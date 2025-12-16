@@ -46,7 +46,7 @@ class DataCore:
                     try:
                         result = future.result()
                         status = "Success" if result else "Skipped/Failed"
-                        print(f"[{status}] ISIN {proxy.isin} (Ex: {proxy.exchange_id})")
+                        print(f"[{proxy.name}] {status} updating data (Ex: {proxy.exchange_id})")
 
                     except Exception as exc:
                         print(f"Error processing ISIN {proxy.isin}: {exc}")
@@ -73,7 +73,7 @@ class DataCore:
         return None
 
     def _process_proxy(self, proxy: Proxy) -> bool:
-        last_date = proxy.last_data.date() if not pd.isna(proxy.last_date) else None
+        last_date = proxy.last_date.date() if not pd.isna(proxy.last_date) else None
 
         with requests.Session() as session:
             session.headers.update({
@@ -91,6 +91,8 @@ class DataCore:
             else:
                 is_recent = (datetime.date.today() - last_date).days <= 22
                 start = datetime.date.min if is_recent else last_date
+
+            print(f"[{proxy.name}] Fetching data starting from {start.year}-{start.month} ...")
 
             with sqlite3.connect(self.db_path, timeout=30) as conn:
                 self._fetch_and_store(session, proxy, conn, start)
@@ -122,6 +124,8 @@ class DataCore:
                 if buffer:
                     full_df = pd.concat(buffer)
                     Utils.store_prices(conn, proxy.id, proxy.exchange_id, full_df)
+                    buffer.clear()
+                    print(f"[{proxy.name}] Stored data up to {year}")
 
                 month = 1
                 year += 1
