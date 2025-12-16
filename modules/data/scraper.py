@@ -51,7 +51,7 @@ class Scraper:
         if soup is None:
             return None
 
-        dropdown = soup.select_one("select[name='month']")
+        dropdown = soup.select_one("select[onchange='changeMonth(this)']")
         if not dropdown:
             return None
 
