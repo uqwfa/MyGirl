@@ -38,13 +38,23 @@ def test_seed_database(config: dict):
 
 def main():
     config = load_config()
+    path = Path(config['database']['path'])
 
     # from modules.database.database import init_database
     # init_database(config)
     # test_seed_database(config)
 
-    data_core = DataCore(config)
-    data_core.update_data({"US6311011026": [72], "DE0007164600": [6]})
+    #data_core = DataCore(config)
+    #data_core.update_data({"US6311011026": [72], "DE0007164600": [6]})
+
+    from modules.simulation.manager import SecurityManager
+    manager = SecurityManager(path)
+    secs = manager.get_securities(["US6311011026"])
+
+    from modules.technical_analysis.core import TechnicalAnalysisCore
+    t_core = TechnicalAnalysisCore()
+    stats = t_core.get_stats(secs)
+    print(stats)
 
 
 if __name__ == "__main__":
