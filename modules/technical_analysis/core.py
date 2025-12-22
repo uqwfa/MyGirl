@@ -3,31 +3,38 @@ import pandas as pd
 from modules.technical_analysis.threshold import ThresholdCalculator
 from modules.simulation.objects.security import Security
 from modules.technical_analysis.book import BookStrategy
+from modules.simulation.objects.order import Order
 
 
 class TechnicalAnalysisCore:
 
-    def get_stats(self, securities: list[Security]) -> dict[Security, dict]:
+    def get_stats(self, securities: list[Security | Order]) -> dict[Security | Order, dict]:
         return {
-            sec: self.process_sec(sec)
+            sec: self.process_sec(sec) if isinstance(sec, Security) else self.process_order(sec)
             for sec in securities
         }
 
     @staticmethod
-    def process_sec(security: Security) -> dict:
+    def process_order(order: Order) -> dict:
+        return TechnicalAnalysisCore.process_sec(order.sec, maximum=order.get_maximum(pd.Timestamp.today()))
+
+    @staticmethod
+    def process_sec(security: Security | Order, **kwargs) -> dict:
         data = security.data
         target_request = pd.Timestamp.today()
 
         buy_intervals, used_date = ThresholdCalculator.calculate_thresholds(
             df=data,
             target=target_request,
-            strat_func=BookStrategy.get_buy_mask
+            strat_func=BookStrategy.get_buy_mask,
+            **kwargs
         )
 
         sell_intervals, used_date = ThresholdCalculator.calculate_thresholds(
             df=data,
             target=target_request,
-            strat_func=BookStrategy.get_sell_mask
+            strat_func=BookStrategy.get_sell_mask,
+            **kwargs
         )
 
         if used_date in data.index:

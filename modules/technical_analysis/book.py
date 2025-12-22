@@ -3,7 +3,7 @@ import numpy as np
 
 class BookStrategy:
     @staticmethod
-    def get_buy_mask(history: np.ndarray, hypo_prices: np.ndarray) -> np.ndarray:
+    def get_buy_mask(history: np.ndarray, hypo_prices: np.ndarray, **kwargs) -> np.ndarray:
         """
         history: np.ndarray of shape (n-1,)
         hypo_prices: np.ndarray of shape (num_steps,); default=1000
