@@ -20,13 +20,13 @@ def test_seed_database(config: dict):
     db_path = Path(config['database']['path'])
 
     securities = [
-        ("US6311011026", "NASDAQ 100", 72),
+        ("US6311011026", "NASDAQ 100 Index", 72),
         ("DE0007164600", "SAP SE", 6)
     ]
 
     exchanges = [
         (6, "XETRA", "EUR"),
-        (72, "NASDAQ Indizes", "PNT")
+        (72, "NASDAQ Indices", "PNT")
     ]
 
     import sqlite3
@@ -56,9 +56,9 @@ def main():
     path = Path(config['database']['path'])
 
     # init and seed db
-    # from modules.database.database import init_database
-    # init_database(config)
-    # test_seed_database(config)
+    from modules.database.database import init_database
+    init_database(config)
+    test_seed_database(config)
 
     # update data
     data_core = DataCore(config)
@@ -84,5 +84,27 @@ def main():
         print(stats)
 
 
+def test():
+    config = load_config()
+    path = Path(config['database']['path'])
+
+    from modules.simulation.manager import SecurityManager
+    manager = SecurityManager(path)
+
+    secs = manager.get_securities(["US6311011026", "DE0007164600"])
+
+    from modules.simulation.backtester import Backtester
+    from modules.technical_analysis.book import BookStrategy
+
+    b = Backtester(BookStrategy())
+    e_df, t_df = b.run(manager.get_securities(["US6311011026"]), pd.Timestamp("2020-01-01"), pd.Timestamp("2026-01-09"))
+
+    b = Backtester(BookStrategy())
+    e_df, t_df = b.run(manager.get_securities(["DE0007164600"]), pd.Timestamp("2020-01-01"), pd.Timestamp("2026-01-09"))
+
+    b = Backtester(BookStrategy())
+    e_df, t_df = b.run(secs, pd.Timestamp("2020-01-01"), pd.Timestamp("2026-01-09"))
+
+
 if __name__ == "__main__":
-    main()
+    test()
