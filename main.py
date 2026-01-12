@@ -3,6 +3,7 @@ import yaml
 from pathlib import Path
 
 from modules.data.core import DataCore
+from modules.technical_analysis.book import BookStrategy
 
 
 def load_config():
@@ -62,7 +63,7 @@ def main():
 
     # update data
     data_core = DataCore(config)
-    data_core.update_data({"US6311011026": [72], "DE0007164600": [6]})
+    # data_core.update_data({"US6311011026": [72], "DE0007164600": [6]})
 
     active_trades = load_active_trades()
 
@@ -70,7 +71,7 @@ def main():
     manager = SecurityManager(path)
 
     from modules.technical_analysis.core import TechnicalAnalysisCore
-    t_core = TechnicalAnalysisCore()
+    t_core = TechnicalAnalysisCore(BookStrategy())
 
     from modules.simulation.objects.order import Order
 
@@ -81,6 +82,7 @@ def main():
 
         order = Order(sec, 0.0, pd.Timestamp(t.get("buy_date")))
         stats = t_core.get_stats([order])[order]
+
         print(stats)
 
 
@@ -107,4 +109,4 @@ def test():
 
 
 if __name__ == "__main__":
-    test()
+    main()

@@ -1,4 +1,5 @@
 import pandas as pd
+import numpy as np
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
@@ -10,7 +11,7 @@ class PositionContext:
     days_held: int
 
 
-class Strategy(ABC):
+class BacktesterStrategy(ABC):
 
     @abstractmethod
     def preprocess(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -22,4 +23,19 @@ class Strategy(ABC):
 
     @abstractmethod
     def check_sell(self, row: pd.Series, context: PositionContext) -> bool:
+        pass
+
+
+class ThresholdStrategy(ABC):
+    @property
+    @abstractmethod
+    def lookback_period(self) -> int:
+        pass
+
+    @abstractmethod
+    def get_buy_mask(self, history: np.ndarray, hypo_prices: np.ndarray, **kwargs) -> np.ndarray:
+        pass
+
+    @abstractmethod
+    def get_sell_mask(self, history: np.ndarray, hypo_prices: np.ndarray, **kwargs) -> np.ndarray:
         pass

@@ -1,39 +1,44 @@
 import pandas as pd
 
 from modules.technical_analysis.threshold import ThresholdCalculator
+from modules.simulation.objects.strategy import ThresholdStrategy
 from modules.simulation.objects.security import Security
 from modules.technical_analysis.book import BookStrategy
 from modules.simulation.objects.order import Order
 
 
 class TechnicalAnalysisCore:
+    def __init__(self, strategy: ThresholdStrategy):
+        self.strategy = strategy
 
-    def get_stats(self, securities: list[Security | Order]) -> dict[Security | Order, dict]:
+    def get_stats(self, securities: list[Security | Order]) -> dict:
         return {
             sec: self.process_sec(sec) if isinstance(sec, Security) else self.process_order(sec)
             for sec in securities
         }
 
-    @staticmethod
-    def process_order(order: Order) -> dict:
-        return TechnicalAnalysisCore.process_sec(order.sec, maximum=order.get_maximum(pd.Timestamp.today()))
+    def process_order(self, order: Order) -> dict:
+        return self.process_sec(order.sec, maximum=order.get_maximum(pd.Timestamp.today()))
 
-    @staticmethod
-    def process_sec(security: Security | Order, **kwargs) -> dict:
+    def process_sec(self, security: Security, **kwargs) -> dict:
         data = security.data
         target_request = pd.Timestamp.today()
+
+        lookback = self.strategy.lookback_period
 
         buy_intervals, used_date = ThresholdCalculator.calculate_thresholds(
             df=data,
             target=target_request,
-            strat_func=BookStrategy.get_buy_mask,
+            strat_func=self.strategy.get_buy_mask,
+            window_size=lookback,
             **kwargs
         )
 
         sell_intervals, used_date = ThresholdCalculator.calculate_thresholds(
             df=data,
             target=target_request,
-            strat_func=BookStrategy.get_sell_mask,
+            strat_func=self.strategy.get_sell_mask,
+            window_size=lookback,
             **kwargs
         )
 

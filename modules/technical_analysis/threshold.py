@@ -1,22 +1,22 @@
 import pandas as pd
 import numpy as np
-from typing import Callable, Optional
+from typing import Callable
 
 
 class ThresholdCalculator:
     @staticmethod
-    def calculate_thresholds(df: pd.DataFrame, target: pd.Timestamp, strat_func: Callable, num_steps: int = 1000,
-                             scale: float = 0.1, column: str = "close", **kwargs) -> tuple[list[list[float]], pd.Timestamp]:
+    def calculate_thresholds(df: pd.DataFrame, target: pd.Timestamp, strat_func: Callable, window_size: int,
+                             num_steps: int = 1000, scale: float = 0.1, column: str = "close", **kwargs) -> tuple[list[list[float]], pd.Timestamp]:
+        if df.empty:
+            print("Empty DataFrame.")
+            return [], target
+
         if target in df.index:
             reference_date = target
             loc_idx = df.index.get_loc(target)
             original_price = df.at[target, column]
 
         else:
-            if df.empty:
-                print("DataFrame is empty.")
-                return [], target
-
             last_date = df.index[-1]
 
             if target < last_date:
@@ -27,13 +27,12 @@ class ThresholdCalculator:
             loc_idx = len(df)
             original_price = df[column].iloc[-1]
 
-        window_size = 19
-        start_loc = max(0, loc_idx - window_size)
-        history = df[column].iloc[start_loc : loc_idx].to_numpy()
-
-        if len(history) < window_size:
+        start_loc = loc_idx - window_size
+        if start_loc < 0:
             print("Not enough historical data to perform calculation.")
             return [], reference_date
+
+        history = df[column].iloc[start_loc : loc_idx].to_numpy()
 
         prices = np.linspace(
             original_price * (1 - scale),
