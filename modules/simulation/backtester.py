@@ -178,20 +178,26 @@ class Backtester:
         })
 
     def _calc_metrics(self, df: pd.DataFrame) -> dict:
-        total_return = (df["equity"].iloc[-1 ] - self.initial_capital) / self.initial_capital
         daily_returns = df["equity"].pct_change().dropna()
+        negative_daily_returns = daily_returns[daily_returns < 0]
 
         if len(daily_returns) > 1:
             daily_rf = self.risk_free_rate / 252
             excess_returns = daily_returns - daily_rf
+
             std_dev = daily_returns.std()
+            neg_std_dev = negative_daily_returns.std()
+
             sharpe_ratio = (excess_returns.mean() / std_dev) * np.sqrt(252) if std_dev != 0 else 0
+            sortino_ratio = (excess_returns.mean() / neg_std_dev) * np.sqrt(252) if neg_std_dev != 0 else 0
 
         else:
             sharpe_ratio = 0
+            sortino_ratio = 0
 
         return {
-            "sharpe_ratio": sharpe_ratio
+            "sharpe_ratio": sharpe_ratio,
+            "sortino_ratio": sortino_ratio
         }
 
     def _generate_report(self):
