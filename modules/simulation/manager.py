@@ -16,7 +16,7 @@ class SecurityManager:
             return []
 
         query = """
-            SELECT id, isin, name
+            SELECT id, isin, name, linked_security_id
             FROM securities
             WHERE isin IN ({})
         """.format(", ".join("?" for _ in isins))
@@ -33,16 +33,46 @@ class SecurityManager:
         for _, row in df.iterrows():
             loader = partial(self._fetch_prices, db_path=self.db_path)
 
+            linked_sec = None
+            if pd.notna(row["linked_security_id"]):
+                linked_id = int(row["linked_security_id"])
+                linked_sec = self._get_security_by_id(linked_id)
+
             sec = Security(
-                id=row["id"],
+                id=int(row["id"]),
                 isin=row["isin"],
                 name=row["name"],
-                loader=loader
+                loader=loader,
+                linked_security=linked_sec
             )
 
             securities.append(sec)
 
         return securities
+
+    def _get_security_by_id(self, sec_id: int) -> Security | None:
+        query = "SELECT id, isin, name FROM securities WHERE id = ?"
+
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                df = pd.read_sql_query(query, conn, params=(sec_id,))
+
+                if df.empty:
+                    return None
+
+                row = df.iloc[0]
+                loader = partial(self._fetch_prices, db_path=self.db_path)
+
+                return Security(
+                    id=int(row["id"]),
+                    isin=row["isin"],
+                    name=row["name"],
+                    loader=loader,
+                    linked_security=None
+                )
+
+        except sqlite3.Error:
+            return None
 
     @staticmethod
     def _fetch_prices(id: int, db_path: Path) -> pd.DataFrame:

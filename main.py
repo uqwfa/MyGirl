@@ -22,7 +22,11 @@ def test_seed_database(config: dict):
 
     securities = [
         ("US6311011026", "NASDAQ 100 Index", 72),
-        ("DE0007164600", "SAP SE", 6)
+        ("DE0007164600", "SAP SE", 6),
+        ("US0378331005", "Apple", 6),
+        ("US5949181045", "Microsoft", 6),
+        ("US67066G1040", "NVIDIA", 6),
+        ("IE00BYVQ9F29", "iShares NASDAQ 100", 45)
     ]
 
     exchanges = [
@@ -36,6 +40,13 @@ def test_seed_database(config: dict):
 
         cursor.executemany("INSERT OR IGNORE INTO securities (isin, name, exchange_id) VALUES (?, ?, ?);", securities)
         cursor.executemany("INSERT OR IGNORE INTO exchanges (id, name, currency) VALUES (?, ?, ?);", exchanges)
+        cursor.execute("""
+                       UPDATE securities
+                       SET linked_security_id = (SELECT id FROM securities WHERE isin = 'IE00BYVQ9F29')
+                       WHERE isin = 'US6311011026';
+                       """)
+
+        conn.commit()
 
 
 def load_active_trades():
@@ -63,7 +74,8 @@ def main():
 
     # update data
     data_core = DataCore(config)
-    # data_core.update_data({"US6311011026": [72], "DE0007164600": [6]})
+    data_core.update_data({"US6311011026": [72], "DE0007164600": [6], "US0378331005": [6], "US5949181045": [6],
+                           "US67066G1040": [6], "IE00BYVQ9F29": [45]})
 
     active_trades = load_active_trades()
 
@@ -93,19 +105,22 @@ def test():
     from modules.simulation.manager import SecurityManager
     manager = SecurityManager(path)
 
-    secs = manager.get_securities(["US6311011026", "DE0007164600"])
+    secs = manager.get_securities(["US6311011026", "DE0007164600", "US0378331005", "US5949181045", "US67066G1040"])
 
     from modules.simulation.backtester import Backtester
     from modules.technical_analysis.book import BookStrategy
 
-    b = Backtester(BookStrategy())
-    e_df, t_df = b.run(manager.get_securities(["US6311011026"]), pd.Timestamp("2020-01-01"), pd.Timestamp("2026-01-09"))
+    s = pd.Timestamp("2016-01-01")
+    e = pd.Timestamp("2025-12-31")
 
     b = Backtester(BookStrategy())
-    e_df, t_df = b.run(manager.get_securities(["DE0007164600"]), pd.Timestamp("2020-01-01"), pd.Timestamp("2026-01-09"))
+    e_df, t_df = b.run(manager.get_securities(["US6311011026"]), s, e)
 
     b = Backtester(BookStrategy())
-    e_df, t_df = b.run(secs, pd.Timestamp("2020-01-01"), pd.Timestamp("2026-01-09"))
+    e_df, t_df = b.run(manager.get_securities(["DE0007164600"]), s, e)
+
+    b = Backtester(BookStrategy())
+    e_df, t_df = b.run(secs, s, e)
 
 
 if __name__ == "__main__":

@@ -3,10 +3,12 @@ from typing import Callable, Optional
 
 
 class Security:
-    def __init__(self, id: int, isin: str, name: str, loader: Optional[Callable[[int], pd.DataFrame]] = None):
+    def __init__(self, id: int, isin: str, name: str, loader: Optional[Callable[[int], pd.DataFrame]] = None,
+                 linked_security: Optional['Security'] = None):
         self.id = id
         self.isin = isin
         self.name = name
+        self.linked_security = linked_security
 
         self._data: Optional[pd.DataFrame] = None
         self._loader = loader
@@ -23,4 +25,8 @@ class Security:
 
     def refresh_data(self):
         self._data = None
+
+        if self.linked_security:
+            self.linked_security.refresh_data()
+
         return self.data

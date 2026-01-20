@@ -8,8 +8,10 @@ CREATE TABLE IF NOT EXISTS securities (
     isin TEXT UNIQUE NOT NULL,
     name TEXT NOT NULL,
     exchange_id INTEGER NOT NULL,
+    linked_security_id INTEGER,
     last_updated DATE,
-    FOREIGN KEY (exchange_id) REFERENCES exchanges(id)
+    FOREIGN KEY (exchange_id) REFERENCES exchanges(id),
+    FOREIGN KEY (linked_security_id) REFERENCES securities(id)
 );
     
 CREATE TABLE IF NOT EXISTS exchanges (
