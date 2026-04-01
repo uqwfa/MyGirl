@@ -26,7 +26,7 @@ def test_seed_database(config: dict):
         ("US0378331005", "Apple", 6),
         ("US5949181045", "Microsoft", 6),
         ("US67066G1040", "NVIDIA", 6),
-        ("IE00BYVQ9F29", "iShares NASDAQ 100", 45)
+        ("IE00BYVQ9F29", "iShares NASDAQ 100", 45)  # Xetra as well
     ]
 
     exchanges = [
@@ -86,7 +86,6 @@ def main():
     t_core = TechnicalAnalysisCore(BookStrategy())
 
     from modules.simulation.objects.order import Order
-
     for t in active_trades:
         isin, buy_date = t.get("isin"), t.get("buy_date")
 
@@ -96,6 +95,13 @@ def main():
         stats = t_core.get_stats([order])[order]
 
         print(stats)
+
+        from modules.simulation.backtester import Backtester
+        b = Backtester(BookStrategy(), silent=True)
+        _, trades_df = b.run([sec], pd.Timestamp(buy_date), pd.Timestamp.now())
+
+        # print last 5 trades
+        print(trades_df.tail())
 
 
 def test():
@@ -110,17 +116,37 @@ def test():
     from modules.simulation.backtester import Backtester
     from modules.technical_analysis.book import BookStrategy
 
-    s = pd.Timestamp("2016-01-01")
+    s = pd.Timestamp("2021-01-01")
     e = pd.Timestamp("2025-12-31")
 
-    b = Backtester(BookStrategy())
-    e_df, t_df = b.run(manager.get_securities(["US6311011026"]), s, e)
+    b = Backtester(BookStrategy(), transaction_fee_fixed=1)
+    # e_df, t_df = b.run(manager.get_securities(["US6311011026"]), s, e)
 
-    b = Backtester(BookStrategy())
-    e_df, t_df = b.run(manager.get_securities(["DE0007164600"]), s, e)
-
-    b = Backtester(BookStrategy())
+    b = Backtester(BookStrategy(
+        bb_window=19,
+        bb_std=1.793,
+        ma_fast=6,
+        ma_medium=10,
+        ma_slow=31,
+        ma_sell_factor=0.916,
+        drawdown_limit=0.952
+    ))
     e_df, t_df = b.run(secs, s, e)
+
+    # b = Backtester(BookStrategy())
+    # e_df, t_df = b.run(manager.get_securities(["DE0007164600"]), s, e)
+
+    # b = Backtester(BookStrategy())
+    # e_df, t_df = b.run(secs, s, e)
+
+    from modules.simulation.strategyOptimizer import StrategyOptimizer
+    # optimizer = StrategyOptimizer(manager.get_securities(["US6311011026"]), s, e)
+    # [I 2026-02-11 19:11:48,282] Trial 913 finished with value: 2.210791010841863 and parameters:
+    # {'bb_window': 19, 'bb_std': 1.793375218802053, 'ma_fast': 6, 'ma_medium': 10, 'ma_slow': 31,
+    # 'ma_sell_factor': 0.9162863339908816, 'drawdown_limit': 0.9519855168472909}.
+    # Best is trial 913 with value: 2.210791010841863.
+    optimizer = StrategyOptimizer(secs, s, e)
+    # optimizer.optimize()
 
 
 if __name__ == "__main__":

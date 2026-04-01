@@ -1,6 +1,7 @@
 import pandas as pd
 import numpy as np
 import random
+import math
 from dataclasses import dataclass
 
 from modules.simulation.objects.strategy import BacktesterStrategy, PositionContext
@@ -14,41 +15,59 @@ class Trade:
     exit_date: pd.Timestamp
     entry_price: float
     exit_price: float
-    quantity: float
+    quantity: int
     pnl: float
     return_pct: float
+    commission: float
 
 
 @dataclass
 class Position:
     security: Security
-    quantity: float
+    quantity: int
     entry_price: float
     entry_date: pd.Timestamp
     current_max_price: float
     last_price: float
+    buy_commission: float
 
 
 class Backtester:
-    def __init__(self, strategy: BacktesterStrategy, initial_capital: float = 100000.0, risk_free_rate: float = 0.0):
+    def __init__(self,
+                 strategy: BacktesterStrategy,
+                 initial_capital: float = 100000.0,
+                 max_positions: int = 5,
+                 risk_free_rate: float = 0.0,
+                 transaction_fee_pct: float = 0.0,
+                 transaction_fee_fixed: float = 1.0,
+                 silent: bool = False):
+
         self.strategy = strategy
         self.initial_capital = initial_capital
+        self.max_positions = max_positions
         self.risk_free_rate = risk_free_rate
+
+        self.fee_pct = transaction_fee_pct
+        self.fee_fixed = transaction_fee_fixed
 
         self.cash = initial_capital
         self.positions: dict[str, Position] = {}
         self.trades: list[Trade] = []
         self.equity_curve: list[dict] = []
 
+        self.silent = silent
+
     def run(self, securities: list[Security], start_date: pd.Timestamp, end_date: pd.Timestamp):
         all_dates = set()
         sec_data_map = {}
 
-        print("Pre-calculating indicators...")
-        for sec in securities:
-            raw_df = sec.data
-            processed_df = self.strategy.preprocess(raw_df)
+        if not self.silent: print("Pre-calculating indicators...")
 
+        for sec in securities:
+            # preprocess data
+            processed_df = self.strategy.preprocess(sec.data)
+
+            # filter dates early to reduce memory usage
             mask = (processed_df.index >= start_date) & (processed_df.index <= end_date)
             sliced_df = processed_df.loc[mask]
 
@@ -58,12 +77,24 @@ class Backtester:
 
         sorted_dates = sorted(list(all_dates))
 
-        print("Running simulation loop...")
+        if not self.silent: print("Running simulation loop...")
+
         for current_date in sorted_dates:
+            if self.cash < 0:
+                print(f"Warning: Cash balance negative at {current_date}. Stopping simulation.")
+                break
+
+            # 1. update portfolio values first
             self._sync_position_prices(current_date, sec_data_map)
+
+            # 2. check sells
             self._process_sells(current_date, sec_data_map)
-            random.shuffle(securities)  # Shuffle to avoid bias in buy order
+
+            # 3. check buys (shuffle to ensure no bias)
+            random.shuffle(securities)
             self._process_buys(current_date, securities, sec_data_map)
+
+            # 4. record history
             self._record_equity(current_date)
 
         return self._generate_report()
@@ -99,20 +130,20 @@ class Backtester:
                 self._execute_sell(pos, date, row['close'])
 
     def _process_buys(self, date: pd.Timestamp, securities: list[Security], data_map: dict):
-        max_positions = 5
         current_pos_count = len(self.positions)
-
-        if current_pos_count >= max_positions:
+        if current_pos_count >= self.max_positions:
             return
 
-        # If universe is 2, slots = 2 => 50%. If universe is 10, slots = 5 => 20%
-        total_slots = min(len(securities), max_positions)
-        target_allocation = self._get_current_equity() / total_slots
+        # allocate capital evenly based on current equity
+        current_equity = self._get_current_equity()
+        target_per_position = current_equity / self.max_positions
 
         for sec in securities:
-            if len(self.positions) >= max_positions:
+            # stop if we already filled all available slots
+            if len(self.positions) >= self.max_positions:
                 break
 
+            # skip if we already have a position in this security
             if sec.isin in self.positions:
                 continue
 
@@ -123,17 +154,30 @@ class Backtester:
             row = df.loc[date]
 
             if self.strategy.check_buy(row):
-                buy_amount = min(target_allocation, self.cash * 0.99)
+                # buy the target amount, but cannot exceed available cash
+                buy_amount = min(target_per_position, self.cash * 0.99)
 
-                if buy_amount > 1:
-                    self._execute_buy(sec, date, row['close'], buy_amount)
+                price = row['close']
+                est_fee = (price * self.fee_pct) + self.fee_fixed
+
+                # check if we can afford at least 1 unit + fee
+                if buy_amount < (price + est_fee):
+                    continue
+
+                self._execute_buy(sec, date, price, buy_amount)
 
     def _execute_sell(self, pos: Position, date: pd.Timestamp, price: float):
-        revenue = pos.quantity * price
-        self.cash += revenue
+        gross_revenue = pos.quantity * price
+        commission = (price * pos.quantity * self.fee_pct) + self.fee_fixed
+        net_revenue = gross_revenue - commission
 
-        pnl = revenue - (pos.quantity * pos.entry_price)
-        ret_pct = (price / pos.entry_price) - 1
+        self.cash += net_revenue
+
+        total_commission = pos.buy_commission + commission
+
+        cost_basis = pos.entry_price * pos.quantity
+        pnl = net_revenue - cost_basis - pos.buy_commission
+        ret_pct = (net_revenue / (cost_basis + pos.buy_commission)) - 1
 
         trade = Trade(
             isin=pos.security.isin,
@@ -143,15 +187,36 @@ class Backtester:
             exit_price=price,
             quantity=pos.quantity,
             pnl=pnl,
-            return_pct=ret_pct
+            return_pct=ret_pct,
+            commission=total_commission
         )
 
         self.trades.append(trade)
         del self.positions[pos.security.isin]
 
     def _execute_buy(self, sec: Security, date: pd.Timestamp, price: float, amount: float):
-        quantity = amount / price
-        self.cash -= amount
+        # calculate how many whole units we can buy with the allocated amount after fees
+        raw_quantity = (amount - self.fee_fixed) / (price * (1 + self.fee_pct))
+        quantity = int(math.floor(raw_quantity))
+
+        if quantity <= 0:
+            return
+
+        # calculate total cost including fees
+        commission = (price * quantity * self.fee_pct) + self.fee_fixed
+        total_cost = (price * quantity) + commission
+
+        # safety check
+        if total_cost > self.cash:
+            quantity -= 1
+
+            if quantity <= 0:
+                return
+
+            commission = (price * quantity * self.fee_pct) + self.fee_fixed
+            total_cost = (price * quantity) + commission
+
+        self.cash -= total_cost
 
         self.positions[sec.isin] = Position(
             security=sec,
@@ -159,7 +224,8 @@ class Backtester:
             entry_price=price,
             entry_date=date,
             current_max_price=price,
-            last_price=price
+            last_price=price,
+            buy_commission=commission
         )
 
     def _get_current_equity(self) -> float:
@@ -204,21 +270,41 @@ class Backtester:
         if not self.equity_curve:
             return pd.DataFrame(), pd.DataFrame()
 
+        # todo: add open positions to trades_df with NaNs for exit data
+        for pos in self.positions.values():
+            open_trade = Trade(
+                isin=pos.security.isin,
+                entry_date=pos.entry_date,
+                exit_date=pd.NaT,
+                entry_price=pos.entry_price,
+                exit_price=np.nan,
+                quantity=pos.quantity,
+                pnl=np.nan,
+                return_pct=np.nan,
+                commission=pos.buy_commission
+            )
+
+            self.trades.append(open_trade)
+
         equity_df = pd.DataFrame(self.equity_curve).set_index("date")
         trades_df = pd.DataFrame([t.__dict__ for t in self.trades])
 
         total_return = (equity_df["equity"].iloc[-1] - self.initial_capital) / self.initial_capital
         metrics = self._calc_metrics(equity_df)
 
-        print("-" * 30)
-        print("BACKTEST FINISHED")
-        print(f"Final Equity: {equity_df['equity'].iloc[-1]:.2f}")
-        print(f"Total Return: {total_return * 100:.2f}%")
-        print(f"Total Trades: {len(trades_df)}")
+        if not self.silent:
+            print("-" * 30)
+            print("BACKTEST FINISHED")
+            print(f"Final Equity: {equity_df['equity'].iloc[-1]:.2f}")
+            print(f"Total Return: {total_return * 100:.2f}%")
+            print(f"Total Trades: {len(trades_df)}")
+            print(f"Avg trade time: {(trades_df['exit_date'] - trades_df['entry_date']).dt.days.mean():.2f} days")
+            print(f"Commission Paid: {trades_df['commission'].sum():.2f}")
+            print(f"Avg Commission: {trades_df['commission'].mean():.2f}")
 
-        for metric, value in metrics.items():
-            print(f"{metric}: {value:.2f}")
+            for metric, value in metrics.items():
+                print(f"{metric}: {value:.2f}")
 
-        print("-" * 30)
+            print("-" * 30)
 
         return equity_df, trades_df
