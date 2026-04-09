@@ -1,15 +1,17 @@
 """
 ingestion/collectors/baseCollector.py
 -------------------------------------
-Base abstract collector class.
 """
 
+import pandas as pd
 from abc import ABC, abstractmethod
-from datetime import date
+
+from storage.models import DateRange
 
 
 class Collector(ABC):
+    """Base abstract collector class."""
 
     @abstractmethod
-    def fetch(self, isin: str, start_date: date, end_date: date, **kwargs) -> any:
+    def fetch(self, isin: str, date_range: DateRange, **kwargs) -> pd.DataFrame:
         """Abstract method to fetch data for a given ISIN and date range."""
