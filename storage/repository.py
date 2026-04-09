@@ -17,15 +17,20 @@ def add_ohlcv_row(rows: list[OHLCVRow]) -> int:
         return 0
 
     sql = """
-        INSERT INTO ohlcv (
-            security_isin, date, open, high, low, close, volume
-        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO ohlcv (security_isin, date, open, high, low, close, volume)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT (security_isin, date) DO UPDATE SET
+            open = excluded.open,
+            high = excluded.high,
+            low = excluded.low,
+            close = excluded.close,
+            volume = excluded.volume
     """
 
     records = [
         (
             r.isin,
-            r.date,
+            r.date.isoformat(),
             r.open,
             r.high,
             r.low,

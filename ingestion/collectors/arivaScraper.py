@@ -17,5 +17,5 @@ class ArivaScraper(Collector):
             print(f"Ariva ID not provided for {isin}")
             return pd.DataFrame()
 
-        # todo: implement logic
+        # todo: implement logic & add DataRange dataclass
         return pd.DataFrame()
