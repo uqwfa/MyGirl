@@ -56,6 +56,9 @@ class ArivaScraper(Collector):
         df = pd.DataFrame(all_rows).set_index("date").sort_index()
         df = df[df.index.to_series().between(date_range.start, date_range.end)]
 
+        if df.empty:
+            print(f"No data returned for {isin} in range {date_range}.")
+
         return df
 
     @staticmethod
