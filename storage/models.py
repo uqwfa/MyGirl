@@ -9,16 +9,25 @@ from datetime import date
 
 
 @dataclass
+class Security:
+    """A security as stored in the database."""
+
+    isin: str
+    name: str
+    ariva_id: int
+
+
+@dataclass
 class OHLCVRow:
     """A single daily OHLCV row for one security."""
 
     isin: str
     date: date
-    open: float
-    high: float
-    low: float
     close: float
-    volume: int
+    open: float | None = None
+    high: float | None = None
+    low: float | None = None
+    volume: int | None = None
 
 
 @dataclass

@@ -8,7 +8,7 @@ from storage.database import get_connection
 from storage.models import OHLCVRow
 
 
-def add_ohlcv_row(rows: list[OHLCVRow]) -> int:
+def add_ohlcv_rows(rows: list[OHLCVRow]) -> int:
     """
     Insert a list of OHLCV rows into the database. Returns the number of rows inserted.
     """
