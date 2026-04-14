@@ -4,8 +4,10 @@ storage/repository.py
 Database data access layer.
 """
 
+import pandas as pd
+
 from storage.database import get_connection
-from storage.models import OHLCVRow, Security
+from storage.models import OHLCVRow, Security, DateRange
 
 
 def upsert_security(security: Security) -> None:
@@ -58,3 +60,20 @@ def add_ohlcv_rows(rows: list[OHLCVRow]) -> int:
         conn.executemany(sql, records)
 
     return len(rows)
+
+
+def fetch_ohlcv(isin: str, date_range: DateRange) -> pd.DataFrame:
+    """"""
+
+    sql = """
+        SELECT date, open, high, low, close, volume
+        FROM ohlcv WHERE security_isin = ? AND date BETWEEN ? AND ?
+        ORDER BY date
+    """
+
+    with get_connection() as conn:
+        df = pd.read_sql(sql, conn, index_col="date", params=(isin, date_range.start, date_range.end))
+
+    df.index = pd.to_datetime(df.index)
+
+    return df

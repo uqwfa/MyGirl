@@ -3,6 +3,9 @@ from datetime import date
 from ingestion.scheduler import schedule_updates
 from storage.database import init_db
 from storage.models import Security, DateRange
+from storage.repository import fetch_ohlcv
+from strategy.strategies.book import BookStrategy
+
 
 if __name__ == "__main__":
     init_db()
@@ -21,4 +24,12 @@ if __name__ == "__main__":
             "ArivaScraper"
         )
     ]
-    schedule_updates(tasks)
+    # schedule_updates(tasks)
+
+    x = fetch_ohlcv("US6311011026", d)
+    print(x)
+
+    b = BookStrategy()
+    a = b.run(x)
+
+    print(a)
