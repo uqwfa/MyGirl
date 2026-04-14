@@ -11,7 +11,7 @@ from ingestion.collectors.arivaScraper import ArivaScraper
 from ingestion.collectors.baseCollector import Collector
 from ingestion.normalizer import normalize
 from storage.models import Security, DateRange
-from storage.repository import add_ohlcv_rows
+from storage.repository import add_ohlcv_rows, upsert_security
 
 
 @dataclass
@@ -97,6 +97,7 @@ def update_security(security: Security, date_range: DateRange, collector_name: s
             print(f"[{security.isin}] No rows to store after normalization.")
             return result
 
+        upsert_security(security)
         result.rows_stored = add_ohlcv_rows(rows)
         print(f"[{security.isin}] Stored {result.rows_stored} rows.")
 
