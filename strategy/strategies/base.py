@@ -12,7 +12,7 @@ from strategy.models import Signal
 class BaseStrategy(ABC):
     """Base abstract strategy class."""
 
-    def __init__(self, params: dict = None):
+    def __init__(self, params: dict | None = None):
         self.params = params or {}
 
     @abstractmethod

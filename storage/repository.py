@@ -63,7 +63,7 @@ def add_ohlcv_rows(rows: list[OHLCVRow]) -> int:
 
 
 def fetch_ohlcv(isin: str, date_range: DateRange) -> pd.DataFrame:
-    """"""
+    """Fetch OHLCV data for a security over a date range."""
 
     sql = """
         SELECT date, open, high, low, close, volume
@@ -71,8 +71,10 @@ def fetch_ohlcv(isin: str, date_range: DateRange) -> pd.DataFrame:
         ORDER BY date
     """
 
+    params = (isin, date_range.start.isoformat(), date_range.end.isoformat())
+
     with get_connection() as conn:
-        df = pd.read_sql(sql, conn, index_col="date", params=(isin, date_range.start, date_range.end))
+        df = pd.read_sql(sql, conn, index_col="date", params=params)
 
     df.index = pd.to_datetime(df.index)
 

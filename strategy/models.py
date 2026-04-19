@@ -10,16 +10,16 @@ from enum import Enum
 
 
 class Direction(str, Enum):
-    LONG  = "long"  # buy
-    SHORT = "short"  # sell
-    FLAT  = "flat"  # neither bought nor sold
-    NAN = "nan"  # not calculatable / error
+    LONG    = "long"     # buy signal
+    SHORT   = "short"    # sell signal
+    FLAT    = "flat"     # no position recommended
+    INVALID = "invalid"  # could not be computed (missing data / error)
 
 
 @dataclass
 class Signal:
     direction: Direction
-    strength:  float  # indicator between 0 and 1
-    date: date | None
+    strength:  float | None  # 0.0 - 1.0 for LONG/SHORT; None for FLAT/INVALID
+    date:      date | None
     strategy:  str
     metadata:  dict = field(default_factory=dict)
