@@ -10,7 +10,7 @@ from strategy.strategies.book import BookStrategy
 if __name__ == "__main__":
     init_db()
 
-    d = DateRange(start=date(2025, 4, 28), end=date.today())
+    d = DateRange(start=date(2026, 1, 1), end=date.today())
     tasks = [
         (
             Security(isin="US6311011026", name="NASDAQ 100 Index", ariva_id=72),
@@ -24,11 +24,13 @@ if __name__ == "__main__":
             "ArivaScraper"
         )
     ]
-    schedule_updates(tasks)
+    # schedule_updates(tasks)
 
     x = fetch_ohlcv("US6311011026", d)
 
     b = BookStrategy()
-    a = b.run(x)
 
-    print(a)
+    # a = b.run(x)
+    # print(a)
+
+    print(b.compute_price_levels(x, as_intervals=True))

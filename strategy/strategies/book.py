@@ -3,6 +3,7 @@ strategy/strategies/book.py
 ---------------------------
 """
 
+import numpy as np
 import pandas as pd
 
 from strategy.strategies.base import BaseStrategy
@@ -129,3 +130,33 @@ class BookStrategy(BaseStrategy):
             strategy=strategy_name,
             metadata={},
         )
+
+    def compute_price_levels(self, df: pd.DataFrame, as_intervals: bool = False) -> list[tuple[float, Signal]]:
+        """"""
+
+        df = df.copy()
+        df = df.sort_index()
+
+        if df.empty:
+            print("Empty DataFrame.")
+            return []
+
+        latest = df["close"].iloc[-1]
+
+        prices = np.linspace(
+            latest * 0.8,
+            latest * 1.2,
+            10000
+        )
+
+        results = []
+        for p in prices:
+            modified_df = df.copy()
+            modified_df.loc[modified_df.index[-1], "close"] = p
+            signal = self.run(modified_df)
+            results.append((p, signal))
+
+        if as_intervals:
+            return self._as_intervals(results)
+
+        return results

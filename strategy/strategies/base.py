@@ -28,3 +28,25 @@ class BaseStrategy(ABC):
 
         enriched_df = self.compute_indicators(df.copy())
         return self.generate_signal(enriched_df)
+
+    @staticmethod
+    def _as_intervals(data: list[tuple[float, Signal]]):
+        """get a list of (price, signal) tuples and convert to intervals of (start_price, end_price, signal)"""
+
+        intervals = []
+        p_start = data[0][0]
+
+        for i in range(len(data) - 1):
+            d_now = data[i][1].direction
+            d_next = data[i + 1][1].direction
+
+            if d_now != d_next:
+                p_end = data[i][0]
+                intervals.append((p_start, p_end, d_now))
+
+                p_start = data[i + 1][0]
+
+        if p_start is not None:
+            intervals.append((p_start, data[-1][0], data[-1][1].direction))
+
+        return intervals
