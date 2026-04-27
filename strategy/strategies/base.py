@@ -42,11 +42,11 @@ class BaseStrategy(ABC):
 
             if d_now != d_next:
                 p_end = data[i][0]
-                intervals.append((p_start, p_end, d_now))
+                intervals.append((p_start, p_end, d_now, data[i][1].metadata.get("strongest_reason")))
 
                 p_start = data[i + 1][0]
 
         if p_start is not None:
-            intervals.append((p_start, data[-1][0], data[-1][1].direction))
+            intervals.append((p_start, data[-1][0], data[-1][1].direction, data[-1][1].metadata.get("strongest_reason")))
 
         return intervals
