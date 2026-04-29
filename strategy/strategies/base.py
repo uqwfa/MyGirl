@@ -3,10 +3,12 @@ strategy/strategies/base.py
 ----------------
 """
 
+import numpy as np
 import pandas as pd
 from abc import ABC, abstractmethod
+from datetime import date
 
-from strategy.models import Signal
+from strategy.models import Signal, Direction
 
 
 class BaseStrategy(ABC):
@@ -29,24 +31,57 @@ class BaseStrategy(ABC):
         enriched_df = self.compute_indicators(df.copy())
         return self.generate_signal(enriched_df)
 
+    def compute_price_levels(self, df: pd.DataFrame, *, as_intervals: bool = False, num_points: int = 500,
+                             price_range: tuple[float, float] = (0.90, 1.10)) -> tuple[date | None, list]:
+        """
+        Sweep a range of hypothetical closing prices and return the signal the strategy
+        would emit at each price point.
+        """
+
+        df = df.copy().sort_index()
+
+        if df.empty:
+            return None, []
+
+        latest = df["close"].iloc[-1]
+        latest_date = df.index[-1]
+        lo, hi = price_range
+
+        prices = np.linspace(latest * lo, latest * hi, num_points)
+        results = []
+
+        for p in prices:
+            test_df = df.copy()
+            test_df.loc[test_df.index[-1], "close"] = p
+            results.append((p, self.run(test_df)))
+
+        if as_intervals:
+            return latest_date, self._as_intervals(results)
+
+        return latest_date, results
+
     @staticmethod
-    def _as_intervals(data: list[tuple[float, Signal]]):
-        """get a list of (price, signal) tuples and convert to intervals of (start_price, end_price, signal)"""
+    def _as_intervals(data: list[tuple[float, Signal]]) -> list[tuple[float, float, Direction, str | None]]:
+        """Convert a sorted ``(price,Signal)`` sequence into direction intervals."""
 
-        intervals = []
+        if not data:
+            return []
+
+        intervals: list[tuple[float, float, Direction, str | None]] = []
         p_start = data[0][0]
+        d_current = data[0][1].direction
 
-        for i in range(len(data) - 1):
-            d_now = data[i][1].direction
-            d_next = data[i + 1][1].direction
+        for i in range(1, len(data)):
+            d_next = data[i][1].direction
 
-            if d_now != d_next:
-                p_end = data[i][0]
-                intervals.append((p_start, p_end, d_now, data[i][1].metadata.get("strongest_reason")))
+            if d_next != d_current:
+                reason = data[i - 1][1].metadata.get("strongest_reason")
+                intervals.append((p_start, data[i - 1][0], d_current, reason))
 
-                p_start = data[i + 1][0]
+                p_start = data[i][0]
+                d_current = d_next
 
-        if p_start is not None:
-            intervals.append((p_start, data[-1][0], data[-1][1].direction, data[-1][1].metadata.get("strongest_reason")))
+        reason = data[-1][1].metadata.get("strongest_reason")
+        intervals.append((p_start, data[-1][0], d_current, reason))
 
         return intervals
