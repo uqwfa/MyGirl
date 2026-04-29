@@ -27,7 +27,7 @@ if __name__ == "__main__":
             "ArivaScraper"
         )
     ]
-    # schedule_updates(tasks)
+    schedule_updates(tasks)
 
     x = fetch_ohlcv("US6311011026", d2)
     b = BookStrategy()
@@ -35,4 +35,4 @@ if __name__ == "__main__":
     print(f"\nCurrent signal:\n{b.run(x)}")
 
     dt, levels = b.compute_price_levels(x, as_intervals=True)
-    print(f"\nPrice Levels for {dt.strftime("%d.%m.%Y")}:\n{levels}")
+    print(f"\nPrice Levels for {dt.strftime("%d.%m.%Y")} with current price {x["close"].iloc[-1]}:\n{levels}")
