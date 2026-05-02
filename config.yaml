@@ -1,7 +1,0 @@
-database:
-  path: "database.db"
-
-data:
-  max_workers: 3
-  retry_attempts: 3
-  backoff_factor: 0.5
