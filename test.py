@@ -1,5 +1,7 @@
 from datetime import date, timedelta
 
+from backtesting import backtester
+from backtesting.backtester import Backtester
 from ingestion.scheduler import schedule_updates
 from storage.database import init_db
 from storage.models import Security, DateRange
@@ -27,7 +29,7 @@ if __name__ == "__main__":
             "ArivaScraper"
         )
     ]
-    schedule_updates(tasks)
+    # schedule_updates(tasks)
 
     x = fetch_ohlcv("US6311011026", d2)
     b = BookStrategy()
@@ -36,3 +38,11 @@ if __name__ == "__main__":
 
     dt, levels = b.compute_price_levels(x, as_intervals=True)
     print(f"\nPrice Levels for {dt.strftime("%d.%m.%Y")} with current price {x["close"].iloc[-1]}:\n{levels}")
+
+    t = Backtester(strat=b, min_lookback=20, initial_capital=100_000.00)
+    d3 = DateRange(start=(today - timedelta(days=(5*365))), end=today)
+    y = fetch_ohlcv("US6311011026", d3)
+    result = t.run(y)
+
+    print(result)
+    print(result.trade_log())

@@ -12,7 +12,7 @@ from enum import Enum
 class Direction(str, Enum):
     LONG    = "long"     # buy signal
     SHORT   = "short"    # sell signal
-    FLAT    = "flat"     # no position recommended
+    FLAT    = "flat"     # not buy nor sell
     INVALID = "invalid"  # could not be computed (missing data / error)
 
 
