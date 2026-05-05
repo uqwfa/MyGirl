@@ -138,6 +138,8 @@ class Backtester:
         if n < self.min_lookback:
             raise ValueError(f"DataFrame has {n} rows but at least {self.min_lookback} are required")
 
+        df = self.strat.compute_indicators(df)
+
         closes = df["close"].to_numpy(dtype=float)
         dates = df.index.tolist()
 
@@ -152,7 +154,10 @@ class Backtester:
         eq_values: list[float] = []
 
         for i in range(self.min_lookback, n - 1):
-            signal = self.strat.run(df.iloc[: i + 1])  # todo: change, e.x. for sell data should start at entry date because of maximum value
+            if shares != 0.0:
+                signal = self.strat.generate_signal(df[: i + 1], buy_date=entry_date)
+            else:
+                signal = self.strat.generate_signal(df.iloc[: i + 1])
 
             if signal.direction == Direction.INVALID:
                 raise ValueError(f"Strategy returned an INVALID signal at bar {i}: {signal.metadata.get('error')}")

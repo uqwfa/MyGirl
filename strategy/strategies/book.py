@@ -36,7 +36,7 @@ class BookStrategy(BaseStrategy):
 
         return df
 
-    def generate_signal(self, df: pd.DataFrame) -> Signal:
+    def generate_signal(self, df: pd.DataFrame, *, buy_date: date = None) -> Signal:
         strategy_name = self.__class__.__name__
 
         if df.empty:
@@ -50,6 +50,12 @@ class BookStrategy(BaseStrategy):
 
         try:
             last = df.iloc[-1]
+            period_high = 0.0
+
+            if buy_date is not None:
+                buy_idx = df.index.get_loc(buy_date)
+                period_high = df["close"].iloc[buy_idx:].max()
+
             return self._score(
                 price=last["close"],
                 current_date=df.index[-1],
@@ -58,7 +64,7 @@ class BookStrategy(BaseStrategy):
                 ma_4=last["ma_4"],
                 ma_9=last["ma_9"],
                 ma_18=last["ma_18"],
-                period_high=df["close"].max(),
+                period_high=period_high,
                 strategy_name=strategy_name
             )
 
@@ -74,7 +80,7 @@ class BookStrategy(BaseStrategy):
             )
 
     def compute_price_levels(self, df: pd.DataFrame, *, as_intervals: bool = False, num_points: int = 500,
-                             price_range: tuple[float, float] = (0.80, 1.20)) -> tuple[date | None, list]:
+                             price_range: tuple[float, float] = (0.90, 1.10), buy_date: date | None = None) -> tuple[date | None, list]:
         df = df.copy().sort_index()
 
         if df.empty:
@@ -101,7 +107,10 @@ class BookStrategy(BaseStrategy):
         sum_18 = hist_close[-17:].sum()  # last 17 real closes → + p = MA18
 
         hist_bb = hist_close[-(bb_window - 1):]
-        period_high = float(hist_close.max())
+        period_high = 0
+        if buy_date is not None:
+            buy_idx = df.index.get_loc(buy_date)
+            period_high = df["close"].iloc[buy_idx:].max()
 
         lo, hi = price_range
         prices = np.linspace(latest * lo, latest * hi, num_points)

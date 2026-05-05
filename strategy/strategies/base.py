@@ -22,17 +22,20 @@ class BaseStrategy(ABC):
         """Add indicator columns to df and return it."""
 
     @abstractmethod
-    def generate_signal(self, df: pd.DataFrame) -> Signal:
-        """Given a df with indicator columns already attached, return a Signal object."""
+    def generate_signal(self, df: pd.DataFrame, *, buy_date: date | None = None) -> Signal:
+        """
+        Given a df with indicator columns already attached, return a Signal object. For sell signals is sometimes
+        useful to know the buy date.
+        """
 
-    def run(self, df: pd.DataFrame) -> Signal:
+    def run(self, df: pd.DataFrame, *, buy_date: date | None = None) -> Signal:
         """The single public entry point - for backtesting and live trading."""
 
         enriched_df = self.compute_indicators(df.copy())
-        return self.generate_signal(enriched_df)
+        return self.generate_signal(enriched_df, buy_date=buy_date)
 
     def compute_price_levels(self, df: pd.DataFrame, *, as_intervals: bool = False, num_points: int = 500,
-                             price_range: tuple[float, float] = (0.90, 1.10)) -> tuple[date | None, list]:
+                             price_range: tuple[float, float] = (0.90, 1.10), buy_date: date | None = None) -> tuple[date | None, list]:
         """
         Sweep a range of hypothetical closing prices and return the signal the strategy
         would emit at each price point.
@@ -53,7 +56,7 @@ class BaseStrategy(ABC):
         for p in prices:
             test_df = df.copy()
             test_df.loc[test_df.index[-1], "close"] = p
-            results.append((p, self.run(test_df)))
+            results.append((p, self.run(test_df, buy_date=buy_date)))
 
         if as_intervals:
             return latest_date, self._as_intervals(results)
