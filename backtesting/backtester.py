@@ -4,9 +4,8 @@ backtesting/backtester.py
 """
 
 import math
-import numpy as np
 import pandas as pd
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date
 
 from strategy.models import Direction
@@ -15,7 +14,7 @@ from strategy.strategies.base import BaseStrategy
 
 @dataclass
 class Trade:
-    """"""
+    """Represents a single completed round-trip trade."""
 
     entry_date: date
     exit_date: date
@@ -38,7 +37,8 @@ class Trade:
 
 @dataclass
 class BacktestResult:
-    """"""
+    """Aggregated results and statistics from a completed backtest run."""
+
 
     strategy: str
     ticker: str
@@ -56,9 +56,9 @@ class BacktestResult:
     profit_factor: float | None
     avg_trade_duration_days: float | None
     trades: list[Trade]
-    equity_curve: pd.Series
-    total_fees: float
-    avg_fee: float
+    equity_curve: pd.Series = field(compare=False, repr=False)
+    total_fees: float = 0.0
+    avg_fee: float = 0.0
 
     def __str__(self) -> str:
         def _f(v, fmt, unit=""):
@@ -108,7 +108,7 @@ class BacktestResult:
                 f"{t.entry_date.strftime("%d.%m.%Y"):<12} {t.exit_date.strftime("%d.%m.%Y"):<12}  "
                 f"{t.entry_price:>10.2f} {t.exit_price:>10.2f}  "
                 f"{sign}{t.pnl:>9.2f}  "
-                f"{sign}{t.return_pct:>7.2f}%  "
+                f"{sign}{t.return_pct * 100:>7.2f}%  "
                 f"{t.duration_days:>5}d"
             )
 
@@ -118,7 +118,7 @@ class BacktestResult:
 
 
 class Backtester:
-    """"""
+    """Event-driven backtester that replays a strategy over a price DataFrame."""
 
     def __init__(self, strat: BaseStrategy, *, initial_capital: float = 10_000.00, min_lookback: int = 0,
                  fee_fixed: float = 1.0, ticker: str = "unknown"):
@@ -130,14 +130,13 @@ class Backtester:
         self.min_lookback = min_lookback
 
     def run(self, df: pd.DataFrame) -> BacktestResult:
-        """"""
+        """Run the backtest over *df* and return a ``BacktestResult``."""
 
         df = df.copy().sort_index()
         n = len(df)
 
-        required = self.min_lookback
-        if n < required:
-            raise ValueError(f"DataFrame has {n} rows but {required} are required")
+        if n < self.min_lookback:
+            raise ValueError(f"DataFrame has {n} rows but at least {self.min_lookback} are required")
 
         closes = df["close"].to_numpy(dtype=float)
         dates = df.index.tolist()
@@ -146,42 +145,48 @@ class Backtester:
         shares = 0.0
         entry_price = 0.0
         entry_date: date | None = None
+        entry_direction = Direction.FLAT
 
         trades: list[Trade] = []
-        eq_index = [dates[self.min_lookback]]
-        eq_values = [self.initial_capital]
+        eq_index = []
+        eq_values: list[float] = []
 
         for i in range(self.min_lookback, n - 1):
-            signal = self.strat.run(df.iloc[:i+1])
+            signal = self.strat.run(df.iloc[: i + 1])  # todo: change, e.x. for sell data should start at entry date because of maximum value
 
             if signal.direction == Direction.INVALID:
-                raise ValueError(f"The signal at index {i} is invalid: {signal.metadata.get('error')}")
+                raise ValueError(f"Strategy returned an INVALID signal at bar {i}: {signal.metadata.get('error')}")
 
-            elif shares != 0.0 and signal.direction == Direction.SHORT:  # close position
+            if shares != 0.0 and signal.direction == Direction.SHORT:
                 trade, cash = self._close(cash=cash, shares=shares, entry_price=entry_price, entry_date=entry_date,
-                                          exit_price=closes[i], exit_date=dates[i])
+                                          exit_price=closes[i], exit_date=dates[i], direction=entry_direction)
 
                 trades.append(trade)
                 shares = 0.0
 
-            elif shares == 0.0 and signal.direction == Direction.LONG:  # open new position
+            elif shares == 0.0 and signal.direction == Direction.LONG:
                 res = self._open(cash, closes[i])
+
                 if res is None:
-                    print(f"cant buy")
+                    print(f"Insufficient cash {cash:.2f} to buy at {closes[i]:.2f} — skipping bar {i}d")
+                    eq_index.append(dates[i])
+                    eq_values.append(cash + shares * closes[i])
                     continue
 
                 shares, cash = res
                 entry_price, entry_date = closes[i], dates[i]
+                entry_direction = Direction.LONG
 
             eq_index.append(dates[i])
-            eq_values.append((cash + shares * closes[i]))
+            eq_values.append(cash + shares * closes[i])
 
         if shares != 0.0:  # force close any open position at the end
             trade, cash = self._close(cash=cash, shares=shares, entry_price=entry_price, entry_date=entry_date,
-                                      exit_price=closes[-1], exit_date=dates[-1])
+                                      exit_price=closes[-1], exit_date=dates[-1], direction=entry_direction)
 
             trades.append(trade)
-            eq_values[-1] = cash
+            if eq_values:
+                eq_values[-1] = cash
 
         equity_curve = pd.Series(eq_values, index=eq_index, name="equity")
 
@@ -189,46 +194,45 @@ class Backtester:
             trades=trades,
             equity_curve=equity_curve,
             final_capital=cash,
-            start_date=dates[self.min_lookback],
+            start_date=dates[self.min_lookback] if eq_index else dates[0],
             end_date=dates[-1]
         )
 
     def _open(self, cash: float, price: float) -> tuple[float, float] | None:
-        """"""
+        """Compute how many whole shares to buy and return ``(shares, remaining_cash)``."""
 
-        raw_quantity = ((cash - self.fee_fixed) / price)
-        shares = int(math.floor(raw_quantity))
+        shares = int(math.floor((cash - self.fee_fixed) / price))
 
-        if shares <= 0:  # cant be a single share
-            print(f"cash {cash} is less than one share costs {price}")
+        if shares <= 0:
             return None
 
-        total_cost = (price * shares) + self.fee_fixed
+        total_cost = price * shares + self.fee_fixed
         remaining_cash = cash - total_cost
 
         return shares, remaining_cash
 
     def _close(self, *, cash: float, shares: float, entry_price: float, entry_date: date, exit_price: float,
-               exit_date: date) -> tuple[Trade, float]:
-        """"""
+               exit_date: date, direction: Direction) -> tuple[Trade, float]:
+        """Settle a position and return ``(Trade,new_cash)``."""
 
         gross_proceeds = shares * exit_price
-        total_fees = 2 * self.fee_fixed  # fee for opening and closing
-        net_proceeds = gross_proceeds - total_fees  # cash got for selling
+        exit_fee = self.fee_fixed
 
-        pnl = (shares * exit_price) - (shares * entry_price) - total_fees
-
-        buy_costs = shares * entry_price  # price paid for buying
-        return_pct = (net_proceeds / (buy_costs + total_fees)) - 1
-
+        net_proceeds = gross_proceeds - exit_fee
         new_cash = cash + net_proceeds
+
+        total_fees = 2 * self.fee_fixed
+        pnl = shares * (exit_price - entry_price) - total_fees
+
+        entry_total_cost = shares * entry_price + self.fee_fixed
+        return_pct = pnl / entry_total_cost
 
         t = Trade(
             entry_date=entry_date,
             exit_date=exit_date,
             entry_price=entry_price,
             exit_price=exit_price,
-            direction=Direction.LONG,
+            direction=direction,
             shares=shares,
             pnl=pnl,
             return_pct=return_pct,
@@ -239,24 +243,23 @@ class Backtester:
 
     def _compute_metrics(self, *, trades: list[Trade], equity_curve: pd.Series, final_capital: float, start_date: date,
                          end_date: date) -> BacktestResult:
-        """"""
+        """Compute all performance metrics and assemble a ``BacktestResult``."""
 
         total_ret = ((final_capital / self.initial_capital) - 1) * 100
 
         try:
             cal_days = max((end_date - start_date).days, 1)
-
         except TypeError:
             cal_days = 1
 
-        # annualized return
+        # Annualized return (only meaningful for periods >= 30 days)
         ann_ret: float | None = None
         if cal_days >= 30:
             ann_ret = (
                 (final_capital / self.initial_capital) ** (365.25 / cal_days) - 1
             ) * 100
 
-        # Sharpe ratio
+        # Sharpe ratio (annualized, risk-free rate = 0)
         daily_rets = equity_curve.pct_change().dropna()
         sharpe: float | None = None
         if len(daily_rets) >= 2:
@@ -264,17 +267,17 @@ class Backtester:
             if std > 1e-12:
                 sharpe = float(daily_rets.mean() / std * math.sqrt(252))
 
-        # drawdown
+        # Maximum drawdown
         rolling_peak = equity_curve.cummax()
         dd_series = (equity_curve - rolling_peak) / rolling_peak * 100.0
         max_dd = float(dd_series.min())
 
-        # Calmer ratio
+        # Calmar ratio
         calmar: float | None = None
         if ann_ret is not None and max_dd < -1e-12:
             calmar = ann_ret / abs(max_dd)
 
-        # trade statistics
+        # Trade-level statistics
         win_rate: float | None = None
         pf: float | None = None
         avg_dur: float | None = None
