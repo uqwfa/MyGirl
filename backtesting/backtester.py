@@ -25,6 +25,7 @@ class Trade:
     pnl: float
     return_pct: float
     fees: float
+    reason: str
 
     @property
     def duration_days(self) -> int:
@@ -96,7 +97,7 @@ class BacktestResult:
             return "No completed trades."
 
         header = f"{'#':<4} {'Dir':<5}  {'Entry Date':<12} {'Exit Date':<12}  " \
-                 f"{'Entry':>10} {'Exit':>10}  {'PnL':>10}  {'Ret%':>8}  {'Days':>5}"
+                 f"{'Entry':>10} {'Exit':>10}  {'PnL':>10}  {'Ret%':>8}  {'Days':>5}  {'Reason':>50}"
         sep = "─" * len(header)
         rows = [header, sep]
 
@@ -110,6 +111,7 @@ class BacktestResult:
                 f"{sign}{t.pnl:>9.2f}  "
                 f"{sign}{t.return_pct * 100:>7.2f}%  "
                 f"{t.duration_days:>5}d"
+                f"{t.reason:>50}"
             )
 
         rows.append(sep)
@@ -130,7 +132,12 @@ class Backtester:
         self.min_lookback = min_lookback
 
     def run(self, df: pd.DataFrame) -> BacktestResult:
-        """Run the backtest over *df* and return a ``BacktestResult``."""
+        """
+        Run the backtest over ``df`` and return a ``BacktestResult``.
+
+        Since the prices don't change during the backtesting, the indicators can be computed only once at the
+        start.
+        """
 
         df = df.copy().sort_index()
         n = len(df)
@@ -154,20 +161,21 @@ class Backtester:
         eq_values: list[float] = []
 
         for i in range(self.min_lookback, n - 1):
-            if shares != 0.0:
-                signal = self.strat.generate_signal(df[: i + 1], buy_date=entry_date)
-            else:
-                signal = self.strat.generate_signal(df.iloc[: i + 1])
+            signal = self.strat.generate_signal(df[: i + 1], buy_date=entry_date)
 
             if signal.direction == Direction.INVALID:
                 raise ValueError(f"Strategy returned an INVALID signal at bar {i}: {signal.metadata.get('error')}")
 
             if shares != 0.0 and signal.direction == Direction.SHORT:
                 trade, cash = self._close(cash=cash, shares=shares, entry_price=entry_price, entry_date=entry_date,
-                                          exit_price=closes[i], exit_date=dates[i], direction=entry_direction)
+                                          exit_price=closes[i], exit_date=dates[i], direction=entry_direction,
+                                          reason=signal.metadata.get("strongest_reason"))
 
                 trades.append(trade)
                 shares = 0.0
+                entry_price = 0.0
+                entry_date = None
+                entry_direction = Direction.FLAT
 
             elif shares == 0.0 and signal.direction == Direction.LONG:
                 res = self._open(cash, closes[i])
@@ -187,7 +195,8 @@ class Backtester:
 
         if shares != 0.0:  # force close any open position at the end
             trade, cash = self._close(cash=cash, shares=shares, entry_price=entry_price, entry_date=entry_date,
-                                      exit_price=closes[-1], exit_date=dates[-1], direction=entry_direction)
+                                      exit_price=closes[-1], exit_date=dates[-1], direction=entry_direction,
+                                      reason="Simulation ended!")
 
             trades.append(trade)
             if eq_values:
@@ -217,7 +226,7 @@ class Backtester:
         return shares, remaining_cash
 
     def _close(self, *, cash: float, shares: float, entry_price: float, entry_date: date, exit_price: float,
-               exit_date: date, direction: Direction) -> tuple[Trade, float]:
+               exit_date: date, direction: Direction, reason: str) -> tuple[Trade, float]:
         """Settle a position and return ``(Trade,new_cash)``."""
 
         gross_proceeds = shares * exit_price
@@ -241,7 +250,8 @@ class Backtester:
             shares=shares,
             pnl=pnl,
             return_pct=return_pct,
-            fees=total_fees
+            fees=total_fees,
+            reason=reason
         )
 
         return t, new_cash

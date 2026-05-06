@@ -1,6 +1,6 @@
 """
 strategy/strategies/base.py
-----------------
+---------------------------
 """
 
 import numpy as np
@@ -15,21 +15,33 @@ class BaseStrategy(ABC):
     """Base abstract strategy class."""
 
     def __init__(self, params: dict | None = None):
+        """Initialize the strategy with optional parameters."""
+
         self.params = params or {}
 
     @abstractmethod
     def compute_indicators(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Add indicator columns to df and return it."""
+        """
+        Add static indicator columns to the whole DataFrame ``df`` that doesn't need extra information and returns it.
+        """
 
     @abstractmethod
     def generate_signal(self, df: pd.DataFrame, *, buy_date: date | None = None) -> Signal:
         """
-        Given a df with indicator columns already attached, return a Signal object. For sell signals is sometimes
-        useful to know the buy date.
+        Given a ``df`` with indicator columns already attached (e.x. from the ``compute_indicators`` method) and
+        additional information, this method returns a ``Signal`` object with the strategy's recommendation for the
+        latest date in the DataFrame. The ``buy_date`` parameter is optional and can be used to provide context for
+        sell signals, such as the date of purchase.
         """
 
     def run(self, df: pd.DataFrame, *, buy_date: date | None = None) -> Signal:
-        """The single public entry point - for backtesting and live trading."""
+        """
+        The single public entry point - for backtesting and live trading.
+
+        It enriches the input DataFrame ``df`` with the own ``compute_indicators`` method and returns the recommendation
+        ``Signal`` for the latest date in the DataFrame using the own ``generate_signal`` method. The ``buy_date`` parameter
+        is optional and can be used to provide context for the signals.
+        """
 
         enriched_df = self.compute_indicators(df.copy())
         return self.generate_signal(enriched_df, buy_date=buy_date)
@@ -37,8 +49,12 @@ class BaseStrategy(ABC):
     def compute_price_levels(self, df: pd.DataFrame, *, as_intervals: bool = False, num_points: int = 500,
                              price_range: tuple[float, float] = (0.90, 1.10), buy_date: date | None = None) -> tuple[date | None, list]:
         """
-        Sweep a range of hypothetical closing prices and return the signal the strategy
-        would emit at each price point.
+        Sweep a range of hypothetical closing prices and return the signal the strategy would emit at each price point.
+
+        The price levels are computed for the lastest date in the DataFrame. It works by setting the price
+        value of the latest date to the hypothetical closing prices and calling the own ``run`` method. It uses ``run``
+        and not ``generate_signal`` because with changing prices also comes changing indicators. The ``buy_date``
+        parameter is optional and can be used to provide context for the signals.
         """
 
         df = df.copy().sort_index()
@@ -65,7 +81,10 @@ class BaseStrategy(ABC):
 
     @staticmethod
     def _as_intervals(data: list[tuple[float, Signal]]) -> list[tuple[float, float, Direction, str | None]]:
-        """Convert a sorted ``(price,Signal)`` sequence into direction intervals."""
+        """
+        Convert a sorted ``(price,Signal)`` tuple sequence into direction intervals sequence with the layout:
+        ``(start_price,end_price,direction,reason)``.
+        """
 
         if not data:
             return []
