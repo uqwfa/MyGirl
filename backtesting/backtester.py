@@ -125,6 +125,8 @@ class Backtester:
     def __init__(self, strat: BaseStrategy, *, initial_capital: float = 10_000.00, min_lookback: int = 0,
                  fee_fixed: float = 1.0, ticker: str = "unknown"):
 
+        # todo: add slippage
+
         self.strat = strat
         self.initial_capital = initial_capital
         self.fee_fixed = fee_fixed
@@ -200,7 +202,8 @@ class Backtester:
 
             trades.append(trade)
             if eq_values:
-                eq_values[-1] = cash
+                eq_index.append(dates[-1])
+                eq_values.append(cash)
 
         equity_curve = pd.Series(eq_values, index=eq_index, name="equity")
 

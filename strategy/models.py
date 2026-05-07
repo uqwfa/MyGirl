@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from datetime import date
 from enum import Enum
 
+# todo: Rename short to sell
 
 class Direction(str, Enum):
     LONG    = "long"     # buy signal

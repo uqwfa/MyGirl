@@ -1,18 +1,62 @@
 from datetime import date, timedelta
 
 import optuna
-from pandas.core.computation.ops import BOOL_OPS_SYMS
 
 from backtesting.backtester import Backtester
 from ingestion.scheduler import schedule_updates
 from storage.database import init_db
 from storage.models import Security, DateRange
 from storage.repository import fetch_ohlcv
+from strategy.optimizer.strategyWalkForwardOptimizer import WFO
 from strategy.strategies.book import BookStrategy
-from strategy.strategyOptimizer import StrategyOptimizer
+from strategy.optimizer.strategyOptimizer import StrategyOptimizer
+
+
+def book_strategy_param_space(trial: optuna.Trial):
+    return {
+        "bb_window": trial.suggest_int("bb_window", 10, 50),
+        "bb_factor": trial.suggest_float("bb_factor", 1.0, 3.0),
+        "ma_short": trial.suggest_int("ma_short", 2, 6),
+        "ma_medium": trial.suggest_int("ma_medium", 6, 12),
+        "ma_long": trial.suggest_int("ma_long", 14, 22),
+        "sell_factor": trial.suggest_float("sell_factor", 0.85, 1.05),
+        "drawdown_limit": trial.suggest_float("drawdown_limit", 0.70, 1.0)
+    }
+
+
+def wfo():
+    print(f"\n--- Walk-Forward Optimization ---")
+
+    today = date.today()
+    d_wfo = DateRange(start=(today - timedelta(days=(10*365 + 10))), end=today)
+    y_wfo = fetch_ohlcv("US6311011026", d_wfo)
+
+    wfo = WFO(
+        strategy_class=BookStrategy,
+        param_space_func=book_strategy_param_space,
+        min_lookback=50,
+        initial_capital=100_000.00,
+        target="sharpe_ratio",
+        verbose=False
+    )
+
+    wfo_result = wfo.run(
+        y_wfo,
+        train_years=4,
+        test_years=1,
+        step_months=12,
+        n_trials=5
+    )
+
+    print("\n" + str(wfo_result))
 
 if __name__ == "__main__":
     init_db()
+
+    wfo()
+
+    import sys
+    sys.exit(1)
 
     today = date.today()
     d = DateRange(start=(today-timedelta(days=30)), end=today)
@@ -30,7 +74,7 @@ if __name__ == "__main__":
             "ArivaScraper"
         )
     ]
-    # schedule_updates(tasks)
+    schedule_updates(tasks)
 
     d2 = DateRange(start=date(2025, 4, 28), end=today)
     x = fetch_ohlcv("US6311011026", d2)
@@ -48,16 +92,7 @@ if __name__ == "__main__":
     # print(result)
     # print(result.trade_log())
 
-    def book_strategy_param_space(trial: optuna.Trial):
-        return {
-            "bb_window": trial.suggest_int("bb_window", 10, 50),
-            "bb_factor": trial.suggest_float("bb_factor", 1.0, 3.0),
-            "ma_short": trial.suggest_int("ma_short", 2, 6),
-            "ma_medium": trial.suggest_int("ma_medium", 6, 12),
-            "ma_long": trial.suggest_int("ma_long", 14, 22),
-            "sell_factor": trial.suggest_float("sell_factor", 0.85, 1.05),
-            "drawdown_limit": trial.suggest_float("drawdown_limit", 0.70, 1.0)
-        }
+
 
     optimizer = StrategyOptimizer(
         strategy_class=BookStrategy,

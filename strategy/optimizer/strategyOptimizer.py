@@ -1,3 +1,8 @@
+"""
+strategy/optimizer/strategyOptimizer.py
+-----------------------------
+"""
+
 import optuna
 import pandas as pd
 from dataclasses import dataclass, field
@@ -90,14 +95,27 @@ class StrategyOptimizer:
 
             try:
                 result = backtester.run(df)
+
+                if self.min_trades > 0 and result.num_trades < self.min_trades:
+                    raise optuna.TrialPruned(f"Only {result.num_trades} trades, minimum is {self.min_trades}")
+
                 metric_val = getattr(result, self.target)
+
+                # todo: what about a composite score? Weighted sum of multiple metrics?
+                #  Or a custom metric function that can be passed in?
 
                 if metric_val is None:
                     raise optuna.TrialPruned()
 
                 duration_val = getattr(result, "avg_trade_duration_days")
-                if duration_val < 30.0:  # add constraints
-                    metric_val = metric_val * (duration_val / 30.0)
+                if duration_val is not None and duration_val < 30.0:
+                    penalty = duration_val / 30.0
+
+                    if direction == "maximize":
+                        metric_val *= penalty
+
+                    else:
+                        metric_val /= penalty
 
                 try:
                     current_best = study.best_value
@@ -116,11 +134,48 @@ class StrategyOptimizer:
         print(f"Starting Optuna optimization for {n_trials} trials...")
         study.optimize(objective, n_trials=n_trials)
 
+        if best_run_data is None:
+            raise RuntimeError("All trials were pruned. No valid backtest result found.")
+
+        n_completed = len([t for t in study.trials if t.state == optuna.trial.TrialState.COMPLETE])
+
         return OptimizerResult(
             best_params=study.best_params,
             best_score=study.best_value,
             best_backtest=best_run_data["result"],
             target=self.target,
-            n_evaluated=n_trials,
-            all_runs=study.trials
+            n_evaluated=n_completed,
+            all_runs=[
+                (t.params, t.value)
+                for t in study.trials
+                if t.state == optuna.trial.TrialState.COMPLETE
+            ]
         )
+
+
+def walk_forward(optimizer: StrategyOptimizer, df: pd.DataFrame, *, train_years: int = 4, test_years: int = 1,
+                 step_months: int = 6, n_trials: int = 100) -> list[BacktestResult]:
+    """"""
+
+    results = []
+    start = df.index[0]
+    end = df.index[-1]
+
+    window_start = start
+    while True:
+        train_end = window_start + pd.DateOffset(years=train_years)
+        test_end = train_end + pd.DateOffset(years=test_years)
+        if test_end > end:
+            break
+
+        train_df = df.loc[window_start:train_end]
+        test_df = df.loc[train_end:test_end]
+
+        opt_result = optimizer.run(train_df, n_trials=n_trials)
+        best_strat = optimizer.strategy_class(params=opt_result.best_params)
+        backtester = Backtester(strat=best_strat)
+        results.append(backtester.run(test_df))
+
+        window_start += pd.DateOffset(months=step_months)
+
+    return results
