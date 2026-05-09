@@ -134,7 +134,7 @@ class StrategyOptimizer:
         print(f"Starting Optuna optimization for {n_trials} trials...")
         study.optimize(objective, n_trials=n_trials)
 
-        if best_run_data is None:
+        if best_run_data["result"] is None:
             raise RuntimeError("All trials were pruned. No valid backtest result found.")
 
         n_completed = len([t for t in study.trials if t.state == optuna.trial.TrialState.COMPLETE])
@@ -151,31 +151,3 @@ class StrategyOptimizer:
                 if t.state == optuna.trial.TrialState.COMPLETE
             ]
         )
-
-
-def walk_forward(optimizer: StrategyOptimizer, df: pd.DataFrame, *, train_years: int = 4, test_years: int = 1,
-                 step_months: int = 6, n_trials: int = 100) -> list[BacktestResult]:
-    """"""
-
-    results = []
-    start = df.index[0]
-    end = df.index[-1]
-
-    window_start = start
-    while True:
-        train_end = window_start + pd.DateOffset(years=train_years)
-        test_end = train_end + pd.DateOffset(years=test_years)
-        if test_end > end:
-            break
-
-        train_df = df.loc[window_start:train_end]
-        test_df = df.loc[train_end:test_end]
-
-        opt_result = optimizer.run(train_df, n_trials=n_trials)
-        best_strat = optimizer.strategy_class(params=opt_result.best_params)
-        backtester = Backtester(strat=best_strat)
-        results.append(backtester.run(test_df))
-
-        window_start += pd.DateOffset(months=step_months)
-
-    return results

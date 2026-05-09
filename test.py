@@ -9,6 +9,7 @@ from storage.models import Security, DateRange
 from storage.repository import fetch_ohlcv
 from strategy.optimizer.strategyWalkForwardOptimizer import WFO
 from strategy.strategies.book import BookStrategy
+from strategy.strategies.book_v2 import BookStrategyV2
 from strategy.optimizer.strategyOptimizer import StrategyOptimizer
 
 
@@ -24,42 +25,9 @@ def book_strategy_param_space(trial: optuna.Trial):
     }
 
 
-def wfo():
-    print(f"\n--- Walk-Forward Optimization ---")
-
+def update_last_30_days():
     today = date.today()
-    d_wfo = DateRange(start=(today - timedelta(days=(10*365 + 10))), end=today)
-    y_wfo = fetch_ohlcv("US6311011026", d_wfo)
-
-    wfo = WFO(
-        strategy_class=BookStrategy,
-        param_space_func=book_strategy_param_space,
-        min_lookback=50,
-        initial_capital=100_000.00,
-        target="sharpe_ratio",
-        verbose=False
-    )
-
-    wfo_result = wfo.run(
-        y_wfo,
-        train_years=4,
-        test_years=1,
-        step_months=12,
-        n_trials=5
-    )
-
-    print("\n" + str(wfo_result))
-
-if __name__ == "__main__":
-    init_db()
-
-    wfo()
-
-    import sys
-    sys.exit(1)
-
-    today = date.today()
-    d = DateRange(start=(today-timedelta(days=30)), end=today)
+    d = DateRange(start=(today - timedelta(days=30)), end=today)
 
     tasks = [
         (
@@ -75,6 +43,44 @@ if __name__ == "__main__":
         )
     ]
     schedule_updates(tasks)
+
+
+def wfo():
+    print(f"\n--- Walk-Forward Optimization ---")
+
+    today = date.today()
+    d_wfo = DateRange(start=(today - timedelta(days=(10*365 + 10))), end=today)
+    y_wfo = fetch_ohlcv("US6311011026", d_wfo)
+
+    wfo = WFO(
+        strategy_class=BookStrategyV2,
+        param_space_func=book_strategy_param_space,
+        min_lookback=50,
+        initial_capital=100_000.00,
+        target="sharpe_ratio",
+        verbose=False
+    )
+
+    wfo_result = wfo.run(
+        y_wfo,
+        train_years=4,
+        test_years=1,
+        step_months=12,
+        n_trials=200
+    )
+
+    print("\n" + str(wfo_result))
+
+    for w in wfo_result.windows:
+        print(f"\n{w.oos_result.trade_log()}")
+
+if __name__ == "__main__":
+    init_db()
+    # update_last_30_days()
+    wfo()
+
+    import sys
+    sys.exit(1)
 
     d2 = DateRange(start=date(2025, 4, 28), end=today)
     x = fetch_ohlcv("US6311011026", d2)
