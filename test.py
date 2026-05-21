@@ -224,10 +224,9 @@ def dailys():
     d3 = DateRange(start=date(2020, 1, 1), end=today)
     y = fetch_ohlcv("US6311011026", d3)
     l = 200
-    args = {"start_date": date(2021, 5, 21)}
+    args = {"start_date": date(2024, 5, 21)}
 
-
-    b = BookStrategy()
+    b = DualTrendStrategy()
     t = Backtester(strat=b, min_lookback=l)
     result = t.run(y, **args)
     print(result)
@@ -238,6 +237,20 @@ def dailys():
     result_2 = t.run(y, **args)
     print(result_2)
     print(result_2.trade_log())
+
+    plot_backtest_comparison([result, result_2])
+
+    import sys
+    sys.exit(1)
+
+
+    b = BookStrategy()
+    t = Backtester(strat=b, min_lookback=l)
+    result = t.run(y, **args)
+    print(result)
+    print(result.trade_log())
+
+
 
     b = BookStrategyV2()
     t = Backtester(strat=b, min_lookback=l)
@@ -250,8 +263,6 @@ def dailys():
     result_4 = t.run(y, **args)
     print(result_4)
     print(result_4.trade_log())
-
-    plot_backtest_comparison([result, result_2, result_3, result_4])
 
 if __name__ == "__main__":
     init_db()

@@ -214,6 +214,7 @@ class Backtester:
         for i in range(loop_start, (loop_end + 1)):
             # up to, but not including index (i + 1)
             signal = self.strat.generate_signal(df[: i + 1], buy_date=entry_date)
+            print(signal)
 
             if signal.direction == Direction.INVALID:
                 raise ValueError(f"Strategy returned an INVALID signal at bar {i}: {signal.metadata.get('error')}")

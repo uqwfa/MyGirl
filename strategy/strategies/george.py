@@ -35,7 +35,19 @@ class DualTrendStrategy(BaseStrategy):
         df["ema_agile_fast"] = df["close"].ewm(span=ema_agile_fast, adjust=False).mean()
         df["ema_agile_slow"] = df["close"].ewm(span=ema_agile_slow, adjust=False).mean()
 
-        high = df['high']
+        rsi_period = int(self.params.get("rsi_period", 14))
+        delta = df["close"].diff()
+        gains = delta.clip(lower=0)
+        losses = -1 * delta.clip(upper=0)
+        avg_gain = gains.ewm(alpha=1/rsi_period, adjust=False).mean()
+        avg_loss = losses.ewm(alpha=1/rsi_period, adjust=False).mean()
+        rs = avg_gain / avg_loss
+        df["rsi"] = np.where(avg_loss == 0, 100, 100 - (100 / (1 + rs)))
+
+        self.rsi_down_trend = False
+        self.rsi_up_trend = False
+
+        """high = df['high']
         low = df['low']
         adx_window = int(self.params.get("adx_window", 14))
         up_move = high - high.shift(1)  # > 0, if p_today > p_yesterday
@@ -49,9 +61,9 @@ class DualTrendStrategy(BaseStrategy):
         tr1 = high - low
         tr2 = (high - close_prev).abs()
         tr3 = (low - close_prev).abs()
-        tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+        tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)"""
 
-        # Wilder's smoothing approximated via Exponential Moving Average
+        """# Wilder's smoothing approximated via Exponential Moving Average
         df['atr'] = tr.ewm(alpha=1 / atr_window, adjust=False).mean()
 
         plus_dm = np.where((up_move > down_move) & (up_move > 0), up_move, 0.0)
@@ -62,7 +74,7 @@ class DualTrendStrategy(BaseStrategy):
         minus_di = 100 * (pd.Series(minus_dm, index=df.index).ewm(alpha=1 / adx_window, adjust=False).mean() / tr_smooth)
 
         dx = 100 * (abs(plus_di - minus_di) / (plus_di + minus_di).replace(0, 1))  # replace 0 to avoid div by zero
-        df['adx'] = dx.ewm(alpha=1 / adx_window, adjust=False).mean()
+        df['adx'] = dx.ewm(alpha=1 / adx_window, adjust=False).mean()"""
 
         return df
 
@@ -96,10 +108,12 @@ class DualTrendStrategy(BaseStrategy):
                 ma_macro_slow=last["ma_macro_slow"],
                 ema_agile_fast=last["ema_agile_fast"],
                 ema_agile_slow=last["ema_agile_slow"],
-                adx=last["adx"],
-                atr=last["atr"],
+                adx=0.0,
+                atr=0.0,
                 period_high=period_high,
-                strategy_name=strategy_name
+                strategy_name=strategy_name,
+                rsi_prev=df.iloc[-2]["rsi"],
+                rsi=last["rsi"]
             )
 
         except Exception as exc:
@@ -114,10 +128,11 @@ class DualTrendStrategy(BaseStrategy):
     def _score(self, *, price: float, current_date: date,
                ma_macro_fast: float, ma_macro_slow: float,
                ema_agile_fast: float, ema_agile_slow: float,
-               adx: float, atr: float, period_high: float, strategy_name: str) -> Signal:
+               adx: float, atr: float, period_high: float, strategy_name: str,
+               rsi_prev: float, rsi: float) -> Signal:
 
         # Abort if data is warming up (NaNs present)
-        if (pd.isna(price) or pd.isna(ma_macro_fast) or pd.isna(ma_macro_slow) or
+        """if (pd.isna(price) or pd.isna(ma_macro_fast) or pd.isna(ma_macro_slow) or
                 pd.isna(ema_agile_fast) or pd.isna(ema_agile_slow) or pd.isna(adx) or pd.isna(atr)):
             return Signal(
                 direction=Direction.FLAT,
@@ -125,15 +140,56 @@ class DualTrendStrategy(BaseStrategy):
                 date=current_date,
                 strategy=strategy_name,
                 metadata={"info": "Waiting for moving averages to populate."}
-            )
+            )"""
 
         long_candidates: list[tuple[float, str]] = []
         short_candidates: list[tuple[float, str]] = []
 
-        # -- BUY LOGIC --
+        rsi_u = self.rsi_up_trend
+        rsi_d = self.rsi_down_trend
+
+        #
+        # BUY
+        #
+        if not self.rsi_down_trend:
+            macro_bull = ma_macro_fast > ma_macro_slow
+            agile_bull = ema_agile_fast > ema_agile_slow
+            if macro_bull and agile_bull:
+                macro_strength = (ma_macro_fast / ma_macro_slow) - 1.0
+                agile_strength = (ema_agile_fast / ema_agile_slow) - 1.0
+                strength = (macro_strength + agile_strength) / 2.0
+                long_candidates.append((strength, f"Macro & Agile trends aligned."))
+                self.rsi_up_trend = False
+
+            rsi_up_threshold = int(self.params.get("rsi_up_threshold", 40))
+            if (rsi_prev < rsi_up_threshold) & (rsi >= rsi_up_threshold):
+                strength = (rsi / rsi_prev) - 1.0
+                long_candidates.append((strength, f"RSI trend aligned."))
+                self.rsi_up_trend = True
+
+        #
+        # SELL
+        #
+        if not self.rsi_up_trend:
+            rsi_down_threshold = int(self.params.get("rsi_down_threshold", 70))
+            if (rsi_prev > rsi_down_threshold) & (rsi <= rsi_down_threshold):
+                strength = 1.0 - (rsi / rsi_prev)
+                short_candidates.append((strength, f"RSI trend flipped."))
+                self.rsi_down_trend = True
+
+            if ema_agile_fast < ema_agile_slow:
+                strength = 1.0 - (ema_agile_fast / ema_agile_slow)
+                short_candidates.append((strength, f"Agile trends flipped."))
+                self.rsi_down_trend = False
+
+            if ma_macro_fast < ma_macro_slow:
+                strength = 1.0 - (ma_macro_fast / ma_macro_slow)
+                short_candidates.append((strength, f"Macro trends flipped."))
+
+
+        """# -- BUY LOGIC --
         adx_threshold = self.params.get("adx_threshold", 20.0)
 
-        macro_bull = ma_macro_fast > ma_macro_slow
         agile_bull = ema_agile_fast > ema_agile_slow
         strong_trend = adx > adx_threshold
 
@@ -158,7 +214,7 @@ class DualTrendStrategy(BaseStrategy):
 
         # 3. Macro Regime Shift (Absolute Cutoff)
         if ma_macro_fast < ma_macro_slow:
-            short_candidates.append((1.0, "Macro regime flipped to bearish. Liquidating."))
+            short_candidates.append((1.0, "Macro regime flipped to bearish. Liquidating."))"""
 
         # -- DECISION RESOLUTION --
         if long_candidates:
@@ -168,7 +224,11 @@ class DualTrendStrategy(BaseStrategy):
                 strength=round(min(best_strength, 1.0), 6),
                 date=current_date,
                 strategy=strategy_name,
-                metadata={"reasons": [r for _, r in long_candidates], "strongest_reason": best_reason}
+                metadata={
+                    "long_reasons": [r for r in long_candidates],
+                    "short_reasons": [r for r in short_candidates],
+                    "reasons": f"rsi_up: {rsi_u} & rsi_down: {rsi_d}"
+                }
             )
 
         if short_candidates:
@@ -178,7 +238,11 @@ class DualTrendStrategy(BaseStrategy):
                 strength=round(min(best_strength, 1.0), 6),
                 date=current_date,
                 strategy=strategy_name,
-                metadata={"reasons": [r for _, r in short_candidates], "strongest_reason": best_reason}
+                metadata={
+                    "long_reasons": [r for r in long_candidates],
+                    "short_reasons": [r for r in short_candidates],
+                    "reasons": f"rsi_up: {rsi_u} & rsi_down: {rsi_d}"
+                }
             )
 
         return Signal(
