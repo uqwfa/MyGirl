@@ -6,6 +6,7 @@ strategy/optimizer/strategyOptimizer.py
 import optuna
 import pandas as pd
 from dataclasses import dataclass, field
+from datetime import date
 from typing import Any, Callable
 
 from backtesting.backtester import Backtester, BacktestResult
@@ -50,7 +51,7 @@ class StrategyOptimizer:
     """
 
     def __init__(self, strategy_class: type[BaseStrategy], param_space_func: Callable[[optuna.Trial], dict[str, Any]],
-                 *, target: str = "sharpe_ratio", initial_capital: float = 10_000.00, fee_fixed: float = 1.0,
+                 *, target: str = "sharpe_ratio", initial_capital: float = 100_000.00, fee_fixed: float = 1.0,
                  ticker: str = "unknown", min_lookback: int = 0, min_trades: int = 1, verbose: bool = True):
         """Initializes a new instance of the ``StrategyOptimizer`` class."""
 
@@ -72,7 +73,8 @@ class StrategyOptimizer:
         if target not in valid_objectives:
             print(f"Warning: Objective {target} is not a valid objective. Valid objectives: {valid_objectives}")
 
-    def run(self, df: pd.DataFrame, *, n_trials: int = 100, maximize: bool = True, seed: int = 42) -> OptimizerResult:
+    def run(self, df: pd.DataFrame, *, n_trials: int = 100, maximize: bool = True, start_date: date | None = None,
+            end_date: date | None = None) -> OptimizerResult:
         """"""
 
         direction = "maximize" if maximize else "minimize"
@@ -94,39 +96,38 @@ class StrategyOptimizer:
             )
 
             try:
-                result = backtester.run(df)
+                result = backtester.run(df, start_date=start_date, end_date=end_date)
 
                 if self.min_trades > 0 and result.num_trades < self.min_trades:
                     raise optuna.TrialPruned(f"Only {result.num_trades} trades, minimum is {self.min_trades}")
 
-                metric_val = getattr(result, self.target)
+                try:
+                    # metric_val = getattr(result, self.target)
+                    score_return = getattr(result, "total_return_pct") * 0.20
+                    score_calmar = getattr(result, "calmar_ratio") * 10.0
+                    score_sharpe = getattr(result, "sharpe_ratio") * 5.0
+
+                except TypeError as exc:
+                    raise optuna.TrialPruned(exc)
+
+                total_score = score_return + score_calmar + score_calmar + score_sharpe
 
                 # todo: what about a composite score? Weighted sum of multiple metrics?
                 #  Or a custom metric function that can be passed in?
 
-                if metric_val is None:
+                if total_score is None:
                     raise optuna.TrialPruned()
-
-                duration_val = getattr(result, "avg_trade_duration_days")
-                if duration_val is not None and duration_val < 30.0:
-                    penalty = duration_val / 30.0
-
-                    if direction == "maximize":
-                        metric_val *= penalty
-
-                    else:
-                        metric_val /= penalty
 
                 try:
                     current_best = study.best_value
                 except ValueError:
                     current_best = float("-inf") if maximize else float("inf")
 
-                is_better = (metric_val > current_best) if maximize else (metric_val < current_best)
+                is_better = (total_score > current_best) if maximize else (total_score < current_best)
                 if is_better:
                     best_run_data["result"] = result
 
-                return metric_val
+                return total_score
 
             except ValueError as exc:
                 raise optuna.TrialPruned(exc)

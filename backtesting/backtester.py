@@ -40,7 +40,6 @@ class Trade:
 class BacktestResult:
     """Aggregated results and statistics from a completed backtest run."""
 
-
     strategy: str
     ticker: str
     start_date: date
@@ -122,7 +121,7 @@ class BacktestResult:
 class Backtester:
     """Event-driven backtester that replays a strategy over a price DataFrame."""
 
-    def __init__(self, strat: BaseStrategy, *, initial_capital: float = 10_000.00, min_lookback: int = 0,
+    def __init__(self, strat: BaseStrategy, *, initial_capital: float = 100_000.00, min_lookback: int = 0,
                  fee_fixed: float = 1.0, ticker: str = "unknown"):
 
         # todo: add slippage
@@ -133,12 +132,20 @@ class Backtester:
         self.ticker = ticker
         self.min_lookback = min_lookback
 
-    def run(self, df: pd.DataFrame) -> BacktestResult:
+    def run(self, df: pd.DataFrame, *, start_date: date | None = None, end_date: date | None = None) -> BacktestResult:
         """
         Run the backtest over ``df`` and return a ``BacktestResult``.
 
         Since the prices don't change during the backtesting, the indicators can be computed only once at the
         start.
+
+        If ``start_date`` is set to ``None``, the backtester starts at earliest available date of the input DataFrame
+        with respect to the minimum lookback window. If the ``start_date`` is provided but falls within the first
+        ``min_lookback`` bars of the data, a ValueError is raised since the strategy won't have enough historical data
+        to compute indicators and generate signals for that date.
+
+        If ``end_date`` is set to ``None``, the backtester runs until the latest available date in the input DataFrame.
+        If ``end_date`` is provided but is beyond the last available date, a ValueError is raised.
         """
 
         df = df.copy().sort_index()
@@ -147,6 +154,48 @@ class Backtester:
         if n < self.min_lookback:
             raise ValueError(f"DataFrame has {n} rows but at least {self.min_lookback} are required")
 
+        if start_date is not None:
+            start_date = pd.Timestamp(start_date)
+        if end_date is not None:
+            end_date = pd.Timestamp(end_date)
+
+        # if self.min_lookback = 20, then the earliest_possible_start is at positional index 19 (the 20th row)
+        earliest_possible_start: pd.Timestamp = df.index[(self.min_lookback - 1)]
+        if start_date is not None and start_date < earliest_possible_start:
+            raise ValueError(
+                f"start_date {start_date.date().strftime("%d.%m.%Y")} is before the first available bar "
+                f"({earliest_possible_start.date().strftime('%d.%m.%Y')})."
+            )
+
+        # if end_date is provided, it must not be beyond the last available bar in the data
+        latest_possible_end: pd.Timestamp = df.index[-1]
+        if end_date is not None and end_date > latest_possible_end:
+            raise ValueError(
+                f"end_date {end_date.date().strftime("%d.%m.%Y")} is beyond the last available bar "
+                f"({latest_possible_end.date().strftime('%d.%m.%Y')})."
+            )
+
+        # if start_date is gap day, use next date; else use earliest possible (min_lookback - 1) index
+        loop_start = (
+            int(df.index.searchsorted(start_date, side="left"))
+            if start_date is not None
+            else (self.min_lookback - 1)
+        )
+        # if end_date is gap day, use prev date; else use latest possible (n - 1) index
+        loop_end = (
+            int(df.index.searchsorted(end_date, side="right")) - 1
+            if end_date is not None
+            else (n - 1)
+        )
+
+        # final sanity check to ensure loop indices are valid and in correct order
+        if loop_end < loop_start:
+            raise ValueError(
+                f"end_date {df.index[loop_end].date().strftime('%d.%m.%Y')} is before the start_date "
+                f"({df.index[loop_start].date().strftime('%d.%m.%Y')})."
+            )
+
+        # calculate the indicators once because prices don't change during backtesting
         df = self.strat.compute_indicators(df)
 
         closes = df["close"].to_numpy(dtype=float)
@@ -162,16 +211,18 @@ class Backtester:
         eq_index = []
         eq_values: list[float] = []
 
-        for i in range(self.min_lookback, n - 1):
+        for i in range(loop_start, (loop_end + 1)):
+            # up to, but not including index (i + 1)
             signal = self.strat.generate_signal(df[: i + 1], buy_date=entry_date)
 
             if signal.direction == Direction.INVALID:
                 raise ValueError(f"Strategy returned an INVALID signal at bar {i}: {signal.metadata.get('error')}")
 
             if shares != 0.0 and signal.direction == Direction.SHORT:
-                trade, cash = self._close(cash=cash, shares=shares, entry_price=entry_price, entry_date=entry_date,
-                                          exit_price=closes[i], exit_date=dates[i], direction=entry_direction,
-                                          reason=signal.metadata.get("strongest_reason"))
+                trade, cash = self._close(
+                    cash=cash, shares=shares, entry_price=entry_price, entry_date=entry_date, exit_price=closes[i],
+                    exit_date=dates[i], direction=entry_direction, reason=signal.metadata.get("strongest_reason", "")
+                )
 
                 trades.append(trade)
                 shares = 0.0
@@ -196,13 +247,14 @@ class Backtester:
             eq_values.append(cash + shares * closes[i])
 
         if shares != 0.0:  # force close any open position at the end
-            trade, cash = self._close(cash=cash, shares=shares, entry_price=entry_price, entry_date=entry_date,
-                                      exit_price=closes[-1], exit_date=dates[-1], direction=entry_direction,
-                                      reason="Simulation ended!")
+            trade, cash = self._close(
+                cash=cash, shares=shares, entry_price=entry_price, entry_date=entry_date, exit_price=closes[loop_end],
+                exit_date=dates[loop_end], direction=entry_direction, reason="Simulation ended!"
+            )
 
             trades.append(trade)
             if eq_values:
-                eq_index.append(dates[-1])
+                eq_index.append(dates[loop_end])
                 eq_values.append(cash)
 
         equity_curve = pd.Series(eq_values, index=eq_index, name="equity")
@@ -211,22 +263,20 @@ class Backtester:
             trades=trades,
             equity_curve=equity_curve,
             final_capital=cash,
-            start_date=dates[self.min_lookback] if eq_index else dates[0],
-            end_date=dates[-1]
+            start_date=dates[loop_start],
+            end_date=dates[loop_end]
         )
 
     def _open(self, cash: float, price: float) -> tuple[float, float] | None:
-        """Compute how many whole shares to buy and return ``(shares, remaining_cash)``."""
+        """Compute how many float shares to buy and return ``(shares, remaining_cash)``."""
 
-        shares = int(math.floor((cash - self.fee_fixed) / price))
+        shares = (cash - self.fee_fixed) / price
 
         if shares <= 0:
             return None
 
-        total_cost = price * shares + self.fee_fixed
-        remaining_cash = cash - total_cost
+        return shares, 0.0
 
-        return shares, remaining_cash
 
     def _close(self, *, cash: float, shares: float, entry_price: float, entry_date: date, exit_price: float,
                exit_date: date, direction: Direction, reason: str) -> tuple[Trade, float]:

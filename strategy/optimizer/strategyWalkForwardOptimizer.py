@@ -78,17 +78,18 @@ class WFO:
         self.verbose = verbose
 
     def run(self, df: pd.DataFrame, *, train_years: int = 4, test_years: int = 1, step_months: int = 12,
-            n_trials: int = 100, maximize: bool = True, seed: int = 42) -> WFOResult:
+            n_trials: int = 100, maximize: bool = True) -> WFOResult:
         """"""
 
         df = df.copy().sort_index()
-        start_date = df.index[0]
         end_date = df.index[-1]
 
-        window_start = start_date
         current_capital = self.initial_capital
         windows: list[WalkForwardWindow] = []
         window_idx = 1
+
+        first_bt_pos = min(self.min_lookback, len(df) - 1)
+        window_start_date = df.index[first_bt_pos]
 
         if not self.verbose:
             optuna.logging.set_verbosity(optuna.logging.WARNING)
@@ -96,29 +97,39 @@ class WFO:
         print(f"Starting Walk-Forward Optimization ({train_years}y train / {test_years}y test / {step_months}mo step)...")
 
         while True:
-            train_end = window_start + pd.DateOffset(years=train_years)
-            test_end = train_end + pd.DateOffset(years=test_years)
+            bt_start_pos = df.index.searchsorted(window_start_date, side="left")
+            if bt_start_pos >= len(df):
+                break
+            bt_start_date = df.index[bt_start_pos]
 
-            if test_end > end_date:
+            train_end_target = bt_start_date + pd.DateOffset(years=train_years)
+            train_end_pos = df.index.searchsorted(train_end_target, side="right") - 1
+            if train_end_pos < bt_start_pos:
+                break
+            train_end_date = df.index[train_end_pos]
+
+            test_end_target = train_end_date + pd.DateOffset(years=test_years)
+            test_end_pos = df.index.searchsorted(test_end_target, side="right") - 1
+            if test_end_pos >= len(df) or df.index[test_end_pos] > end_date:
+                test_end_pos = len(df) - 1
+            test_end_date = df.index[test_end_pos]
+
+            test_bt_start_pos = train_end_pos + 1
+            if test_bt_start_pos > test_end_pos:
+                break
+            test_bt_start_date = df.index[test_bt_start_pos]
+
+            if test_end_date < test_bt_start_date + pd.DateOffset(years=test_years) - pd.DateOffset(days=5):
                 break
 
-            train_df = df.loc[window_start:train_end]
+            train_data_start_pos = max(0, bt_start_pos - self.min_lookback)
+            train_df = df.iloc[train_data_start_pos: train_end_pos + 1]
 
-            test_start_actual = train_end + pd.Timedelta(days=1)
-            test_start_idx = df.index.searchsorted(test_start_actual)
-
-            # buffer the start so indicators can compute
-            buffer_idx = max(0, test_start_idx - self.min_lookback)
-            test_end_idx = df.index.searchsorted(test_end, side="right")
-
-            test_df = df.iloc[buffer_idx:test_end_idx]
+            test_data_start_pos = max(0, test_bt_start_pos - self.min_lookback)
+            test_df = df.iloc[test_data_start_pos: test_end_pos + 1]
 
             if len(test_df) <= self.min_lookback:
                 break
-
-            if self.verbose:
-                print(f"\n[Window {window_idx}] Train: {window_start.date()} -> {train_end.date()} | "
-                      f"Test: {test_start_actual.date()} -> {test_end.date()}")
 
             optimizer = StrategyOptimizer(
                 strategy_class=self.strategy_class,
@@ -132,7 +143,13 @@ class WFO:
                 verbose=False
             )
 
-            opt_result = optimizer.run(train_df, n_trials=n_trials, maximize=maximize, seed=seed)
+            opt_result = optimizer.run(
+                train_df,
+                n_trials=n_trials,
+                maximize=maximize,
+                start_date=bt_start_date,
+                end_date=train_end_date
+            )
 
             best_strat = self.strategy_class(params=opt_result.best_params)
             oos_backtester = Backtester(
@@ -143,22 +160,25 @@ class WFO:
                 ticker=self.ticker
             )
 
-            oos_result = oos_backtester.run(test_df)
+            oos_result = oos_backtester.run(
+                test_df,
+                start_date=test_bt_start_date,
+                end_date=test_end_date
+            )
 
             windows.append(WalkForwardWindow(
                 window_id=window_idx,
-                train_start=window_start,
-                train_end=train_end,
-                test_start=test_start_actual,
-                test_end=test_end,
+                train_start=bt_start_date,
+                train_end=train_end_date,
+                test_start=test_bt_start_date,
+                test_end=test_end_date,
                 best_params=opt_result.best_params,
                 train_score=opt_result.best_score,
                 oos_result=oos_result
             ))
 
             current_capital = oos_result.final_capital
-
-            window_start += pd.DateOffset(months=step_months)
+            window_start_date += pd.DateOffset(months=step_months)
             window_idx += 1
 
         total_return_pct = ((current_capital / self.initial_capital) - 1.0) * 100.0
