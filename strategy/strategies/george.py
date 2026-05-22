@@ -171,7 +171,7 @@ class DualTrendStrategy(BaseStrategy):
         # SELL
         #
         if not self.rsi_up_trend:
-            rsi_down_threshold = int(self.params.get("rsi_down_threshold", 70))
+            rsi_down_threshold = int(self.params.get("rsi_down_threshold", 60))
             if (rsi_prev > rsi_down_threshold) & (rsi <= rsi_down_threshold):
                 strength = 1.0 - (rsi / rsi_prev)
                 short_candidates.append((strength, f"RSI trend flipped."))
@@ -250,5 +250,7 @@ class DualTrendStrategy(BaseStrategy):
             strength=None,
             date=current_date,
             strategy=strategy_name,
-            metadata={}
+            metadata={
+                "reasons": f"rsi_up: {rsi_u} & rsi_down: {rsi_d}"
+            }
         )

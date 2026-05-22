@@ -64,12 +64,11 @@ class WFO:
     """Performs Walk-Forward Optimization (WFO) by rolling a train/test window over a DataFrame."""
 
     def __init__(self, strategy_class: type[BaseStrategy], param_space_func: Callable[[optuna.Trial], dict[str, Any]],
-                 *, target: str = "sharpe_ratio", initial_capital: float = 100_000.00, fee_fixed: float = 1.0,
-                 ticker: str = "unknown", min_lookback: int = 0, min_trades: int = 1, verbose: bool = True):
+                 *, initial_capital: float = 100_000.00, fee_fixed: float = 1.0, ticker: str = "unknown",
+                 min_lookback: int = 0, min_trades: int = 1, verbose: bool = True):
 
         self.strategy_class = strategy_class
         self.param_space_func = param_space_func
-        self.target = target
         self.initial_capital = initial_capital
         self.fee_fixed = fee_fixed
         self.ticker = ticker
@@ -77,8 +76,8 @@ class WFO:
         self.min_trades = min_trades
         self.verbose = verbose
 
-    def run(self, df: pd.DataFrame, *, train_years: int = 4, test_years: int = 1, step_months: int = 12,
-            n_trials: int = 100, maximize: bool = True) -> WFOResult:
+    def run(self, df: pd.DataFrame, *, train_years: int = 2, test_years: int = 1, step_months: int = 12,
+            n_trials: int = 200, maximize: bool = True) -> WFOResult:
         """"""
 
         df = df.copy().sort_index()
@@ -134,7 +133,6 @@ class WFO:
             optimizer = StrategyOptimizer(
                 strategy_class=self.strategy_class,
                 param_space_func=self.param_space_func,
-                target=self.target,
                 initial_capital=self.initial_capital,
                 fee_fixed=self.fee_fixed,
                 ticker=self.ticker,
@@ -188,7 +186,7 @@ class WFO:
 
         return WFOResult(
             strategy=self.strategy_class.__name__,
-            target=self.target,
+            target="score",
             initial_capital=self.initial_capital,
             final_capital=current_capital,
             total_return_pct=total_return_pct,
