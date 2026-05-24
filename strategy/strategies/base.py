@@ -4,6 +4,7 @@ strategy/strategies/base.py
 """
 
 import numpy as np
+import optuna
 import pandas as pd
 from abc import ABC, abstractmethod
 from datetime import date
@@ -18,6 +19,14 @@ class BaseStrategy(ABC):
         """Initialize the strategy with optional parameters."""
 
         self.params = params or {}
+
+    @staticmethod
+    def param_space(trial: optuna.Trial):
+        """
+        Return a parameter space describing the strategy parameters.
+        """
+
+        return {}
 
     @abstractmethod
     def compute_indicators(self, df: pd.DataFrame) -> pd.DataFrame:

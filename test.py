@@ -8,6 +8,7 @@ from storage.database import init_db
 from storage.models import Security, DateRange
 from storage.repository import fetch_ohlcv
 from strategy.optimizer.strategyWalkForwardOptimizer import WFO, WalkForwardWindow, WFOResult
+from strategy.strategies.agileStrategy import SimpleAgileStrategy, simple_agile_space
 from strategy.strategies.base import BaseStrategy
 from strategy.strategies.book import BookStrategy
 from strategy.strategies.book_v2 import BookStrategyV2
@@ -21,6 +22,9 @@ import matplotlib.dates as mdates
 import numpy as np
 import pandas as pd
 from matplotlib.ticker import FuncFormatter
+
+from strategy.strategies.macroStrategy import SimpleMacroStrategy, simple_macro_space
+from strategy.strategies.rsiStrategy import SimpleRSIStrategy
 
 
 def plot_backtest_comparison(results: list[BacktestResult]):
@@ -369,22 +373,6 @@ def book_strategy_param_space(trial: optuna.Trial):
         "drawdown_limit": trial.suggest_float("drawdown_limit", 0.70, 1.0)
     }
 
-def george_strategy_param_space(trial: optuna.Trial):
-    return {
-        "ma_macro_fast": trial.suggest_int("ma_macro_fast", 25, 75),
-        "ma_macro_slow": trial.suggest_int("ma_macro_slow", 100, 300),
-
-        "ema_agile_fast": trial.suggest_int("ema_agile_fast", 4, 14),
-        "ema_agile_slow": trial.suggest_int("ema_agile_slow", 11, 31),
-
-        "rsi_period": trial.suggest_int("rsi_period", 10, 18),
-        "rsi_up_threshold": trial.suggest_int("rsi_up_threshold", 20, 60),
-        "rsi_down_threshold": trial.suggest_int("rsi_down_threshold", 50, 90)
-    }
-
-def buyandhold_param_space(trial: optuna.Trial):
-    return {}
-
 
 def update_last_30_days():
     today = date.today()
@@ -406,66 +394,6 @@ def update_last_30_days():
     schedule_updates(tasks)
 
 
-def wfo():
-    print(f"\n--- Walk-Forward Optimization ---")
-
-    today = date.today()
-    d_wfo = DateRange(start=(today - timedelta(days=(10*365 + 10))), end=today)
-    y_wfo = fetch_ohlcv("US6311011026", d_wfo)
-
-    wfo = WFO(
-        strategy_class=BookStrategyV2,
-        param_space_func=book_strategy_param_space,
-        min_lookback=50,
-        initial_capital=100_000.00,
-        target="sharpe_ratio",
-        verbose=False
-    )
-
-    wfo_result = wfo.run(
-        y_wfo,
-        train_years=2,
-        test_years=1,
-        step_months=12,
-        n_trials=200
-    )
-
-    print("\n" + str(wfo_result))
-
-    for w in wfo_result.windows:
-        print(f"\n{w.oos_result.trade_log()}")
-
-
-def wfo_2():
-    print(f"\n--- Walk-Forward Optimization ---")
-
-    today = date.today()
-    d_wfo = DateRange(start=(today - timedelta(days=(9*365 + 400))), end=today)
-    y_wfo = fetch_ohlcv("US6311011026", d_wfo)
-
-    wfo = WFO(
-        strategy_class=DualTrendStrategy,
-        param_space_func=george_strategy_param_space,
-        min_lookback=250,
-        initial_capital=100_000.00,
-        target="sharpe_ratio",
-        verbose=False
-    )
-
-    wfo_result = wfo.run(
-        y_wfo,
-        train_years=2,
-        test_years=1,
-        step_months=12,
-        n_trials=500
-    )
-
-    print("\n" + str(wfo_result))
-
-    for w in wfo_result.windows:
-        print(f"\n{w.oos_result.trade_log()}")
-
-
 def dailys():
     today = date.today()
     d2 = DateRange(start=date(2025, 4, 28), end=today)
@@ -478,8 +406,7 @@ def dailys():
         print(f"\nPrice Levels for {dt.strftime("%d.%m.%Y")} with current price {x["close"].iloc[-1]}:\n{levels}")
 
 
-def compare_wfos(strats: list[tuple[type[BaseStrategy], Callable[[optuna.Trial], dict[str, Any]]]], *,
-                 min_lookback: int = 300):
+def compare_wfos(strats: list[type[BaseStrategy]], *, min_lookback: int = 300):
     """"""
 
     today = date.today()
@@ -487,10 +414,9 @@ def compare_wfos(strats: list[tuple[type[BaseStrategy], Callable[[optuna.Trial],
     y = fetch_ohlcv("US6311011026", d)
 
     results = []
-    for (strat_class, param_space_func) in strats:
+    for strat_class in strats:
         o = WFO(
             strategy_class=strat_class,
-            param_space_func=param_space_func,
             initial_capital=100_000.00,
             fee_fixed=1.0,
             min_lookback=min_lookback,
@@ -500,16 +426,17 @@ def compare_wfos(strats: list[tuple[type[BaseStrategy], Callable[[optuna.Trial],
 
         res = o.run(
             y,
-            train_years=2,
+            train_years=4,
             test_years=1,
             step_months=12,
             n_trials=200,
             maximize=True
         )
 
+        print(res)
         results.append(res)
 
-    fig = plot_wfo_comparison(results, title="Strategy Comparison — WFO OOS")
+    plot_wfo_comparison(results, title="Strategy Comparison — WFO OOS")
     plt.show()
 
 if __name__ == "__main__":
@@ -517,7 +444,5 @@ if __name__ == "__main__":
     # update_last_30_days()
     # wfo_2()
     # dailys()
-    compare_wfos([
-        (DualTrendStrategy, george_strategy_param_space),
-        (BuyAndHold, buyandhold_param_space)
-    ])
+
+    compare_wfos([DualTrendStrategy, BuyAndHold, SimpleMacroStrategy, SimpleAgileStrategy, SimpleRSIStrategy])

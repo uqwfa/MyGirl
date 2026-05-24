@@ -3,11 +3,12 @@ strategy/optimizer/strategyOptimizer.py
 -----------------------------
 """
 
+import math
 import optuna
 import pandas as pd
 from dataclasses import dataclass, field
 from datetime import date
-from typing import Any, Callable
+from typing import Any
 
 from backtesting.backtester import Backtester, BacktestResult
 from strategy.strategies.base import BaseStrategy
@@ -50,12 +51,11 @@ class StrategyOptimizer:
     Optimizes a strategy's parameters over a given DataFrame using Optuna's Bayesian optimization framework.
     """
 
-    def __init__(self, strategy_class: type[BaseStrategy], param_space_func: Callable[[optuna.Trial], dict[str, Any]],
-                 *, initial_capital: float = 100_000.00, fee_fixed: float = 1.0,
-                 ticker: str = "unknown", min_lookback: int = 0, min_trades: int = 1, verbose: bool = True):
+    def __init__(self, strategy_class: type[BaseStrategy], *, initial_capital: float = 100_000.00,
+                 fee_fixed: float = 1.0, ticker: str = "unknown", min_lookback: int = 0, min_trades: int = 1,
+                 verbose: bool = True):
 
         self.strategy_class = strategy_class
-        self.param_space_func = param_space_func
         self.initial_capital = initial_capital
         self.fee_fixed = fee_fixed
         self.ticker = ticker
@@ -74,7 +74,7 @@ class StrategyOptimizer:
         best_run_data = {"result": None}
 
         def objective(trial: optuna.Trial) -> float:
-            params = self.param_space_func(trial)
+            params = self.strategy_class.param_space(trial)
             strategy_instance = self.strategy_class(params=params)
             backtester = Backtester(
                 strat=strategy_instance,
@@ -93,20 +93,38 @@ class StrategyOptimizer:
                 raise optuna.TrialPruned(f"Only {result.num_trades} trades, minimum is {self.min_trades}")
 
             try:
-                # calmar ratio can be between 0.0 ~ 3.0, normalize to 0.0 ~ 1.0
-                score_c = (getattr(result, "calmar_ratio") / 3)
-                # sharpe ratio can be between 0.0 ~ 2.0, normalize to 0.0 ~ 1.0
-                score_s = (getattr(result, "sharpe_ratio") / 2)
-                # total return can be between -100 (%) ~ 200 (%), normalize to 0.0 ~ 1.0
-                score_r = ((getattr(result, "total_return_pct") + 100) / 3)
+                def _safe(val: float | None, default: float = 0.0) -> float:
+                    return float(val) if val is not None else default
+
+                # 35% calmar ratio
+                # tanh(x/2) for logarithm-like scaling
+                calmar = _safe(result.calmar_ratio)
+                score_c = math.tanh(max(calmar, 0.0) / 2.0)
+
+                # 25% profit factor
+                # pf < 1.0 = losing strategy
+                pf = _safe(result.profit_factor)
+                score_pf = min(max((pf - 1.0) / 2.0, 0.0), 1.0)
+
+                # 20% annualized return
+                ann_ret = _safe(result.annualized_return_pct, default=_safe(result.total_return_pct))
+                score_ann = math.tanh(max(ann_ret, 0.0) / 35.0)
+
+                # 10% max drawdown
+                max_dd = result.max_drawdown_pct
+                score_dd = min(max(1.0 + max_dd / 25.0, 0.0), 1.0)
+
+                # 10% sharpe ratio
+                sharpe = _safe(result.sharpe_ratio)
+                score_s = math.tanh(max(sharpe, 0.0) / 1.5)
             except TypeError as exc:
                 raise optuna.TrialPruned(exc)
 
-            score = 0.5 * score_c + 0.25 * score_s + 0.25 * score_r
+            score = 0.35 * score_c + 0.25 * score_pf + 0.20 * score_ann + 0.10 * score_dd + 0.10 * score_s
 
             try:
                 curr_best = study.best_value
-            except ValueError as exc:
+            except ValueError:
                 curr_best = float("-inf") if maximize else float("inf")
 
             is_better = (score > curr_best) if maximize else (score < curr_best)

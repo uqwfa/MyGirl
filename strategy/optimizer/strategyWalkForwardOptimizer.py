@@ -1,7 +1,7 @@
 import optuna
 import pandas as pd
 from dataclasses import dataclass
-from typing import Callable, Any
+from typing import Any
 
 from backtesting.backtester import Backtester, BacktestResult
 from strategy.optimizer.strategyOptimizer import StrategyOptimizer
@@ -63,12 +63,11 @@ class WFOResult:
 class WFO:
     """Performs Walk-Forward Optimization (WFO) by rolling a train/test window over a DataFrame."""
 
-    def __init__(self, strategy_class: type[BaseStrategy], param_space_func: Callable[[optuna.Trial], dict[str, Any]],
-                 *, initial_capital: float = 100_000.00, fee_fixed: float = 1.0, ticker: str = "unknown",
-                 min_lookback: int = 0, min_trades: int = 1, verbose: bool = True):
+    def __init__(self, strategy_class: type[BaseStrategy], *, initial_capital: float = 100_000.00,
+                 fee_fixed: float = 1.0, ticker: str = "unknown", min_lookback: int = 0, min_trades: int = 1,
+                 verbose: bool = True):
 
         self.strategy_class = strategy_class
-        self.param_space_func = param_space_func
         self.initial_capital = initial_capital
         self.fee_fixed = fee_fixed
         self.ticker = ticker
@@ -132,7 +131,6 @@ class WFO:
 
             optimizer = StrategyOptimizer(
                 strategy_class=self.strategy_class,
-                param_space_func=self.param_space_func,
                 initial_capital=self.initial_capital,
                 fee_fixed=self.fee_fixed,
                 ticker=self.ticker,
